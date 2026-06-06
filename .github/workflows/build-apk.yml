@@ -42,6 +42,30 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Patch expo-modules-core for AGP 8.x compatibility
+        run: |
+          PLUGIN="node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle"
+          python3 - <<'PYEOF'
+import sys
+path = "node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle"
+with open(path, "r") as f:
+    content = f.read()
+
+# Fix: replace `from components.release` with a null-safe version
+# In AGP 8.x, the 'release' component is created lazily and may not be
+# available inside afterEvaluate. Wrapping in another afterEvaluate fixes it.
+old = "          from components.release"
+new = "          afterEvaluate { def c = project.components.findByName('release'); if (c != null) from c }"
+if old in content:
+    content = content.replace(old, new)
+    with open(path, "w") as f:
+        f.write(content)
+    print("✅ Patch applicata: components.release -> null-safe version")
+else:
+    print("⚠️  Pattern non trovato, salto il patch")
+    sys.exit(0)
+PYEOF
+
       - name: Install Expo CLI
         run: npm install -g @expo/cli
 
