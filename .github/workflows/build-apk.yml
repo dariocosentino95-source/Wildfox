@@ -31,13 +31,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK platform + build tools
+      - name: Install SDK components + NDK 25.1.8937393
         run: |
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          # Install the exact NDK version required by react-native 0.73 / expo 50
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393"
           yes | sdkmanager --licenses 2>/dev/null || true
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          echo "NDK disponibili:"
-          ls "$ANDROID_SDK_ROOT/ndk" 2>/dev/null || echo "nessuna cartella ndk"
+          echo "NDK 25.1 installato: $(ls $ANDROID_SDK_ROOT/ndk/25.1.8937393 2>/dev/null && echo SI || echo NO)"
 
       - name: Install npm dependencies
         run: npm ci
@@ -56,13 +56,8 @@ jobs:
 
       - name: Create local.properties
         run: |
+          # Only set sdk.dir — Gradle will resolve NDK via android.ndkVersion from build.gradle
           echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
-          # Cerca il primo NDK installato e aggiungilo se presente
-          NDK_DIR=$(ls -d "$ANDROID_SDK_ROOT/ndk/"* 2>/dev/null | head -1)
-          if [ -n "$NDK_DIR" ]; then
-            echo "ndk.dir=$NDK_DIR" >> android/local.properties
-            echo "NDK trovato: $NDK_DIR"
-          fi
           cat android/local.properties
 
       - name: Patch gradle.properties
@@ -102,7 +97,7 @@ jobs:
         if: success()
         run: |
           APK=$(find android/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -1)
-          echo "✅ APK: $APK ($(du -sh "$APK" | cut -f1))"
+          echo "APK: $APK ($(du -sh "$APK" | cut -f1))"
 
       - name: Upload APK artifact
         if: success()
