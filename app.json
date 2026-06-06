@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Wildfox 3D",
+    "slug": "wildfox3d",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0F"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wildfox.app3d",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Wildfox 3D usa la fotocamera per catturare oggetti e persone in 3D.",
+        "NSMicrophoneUsageDescription": "Wildfox 3D usa il microfono per registrare video.",
+        "NSPhotoLibraryUsageDescription": "Wildfox 3D accede alla galleria per selezionare foto e salvare modelli 3D.",
+        "NSPhotoLibraryAddUsageDescription": "Wildfox 3D salva i modelli 3D esportati nella galleria."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0F"
+      },
+      "package": "com.wildfox.app3d",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      ["expo-camera", { "cameraPermission": "Wildfox 3D usa la fotocamera per catturare oggetti in 3D." }],
+      ["expo-media-library", { "photosPermission": "Wildfox 3D accede alle foto per la ricostruzione 3D.", "savePhotosPermission": "Wildfox 3D salva i modelli esportati." }]
+    ]
+  }
+}
