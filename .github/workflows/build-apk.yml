@@ -31,11 +31,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK components
+      - name: Install SDK platform + build tools
         run: |
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" --no_https 2>/dev/null || true
-          sdkmanager "ndk;25.1.8937393" 2>/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
           yes | sdkmanager --licenses 2>/dev/null || true
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "NDK disponibili:"
+          ls "$ANDROID_SDK_ROOT/ndk" 2>/dev/null || echo "nessuna cartella ndk"
 
       - name: Install npm dependencies
         run: npm ci
@@ -43,11 +45,29 @@ jobs:
       - name: Install Expo CLI
         run: npm install -g @expo/cli
 
-      - name: Generate native Android project
+      - name: Generate native Android project (expo prebuild)
         run: npx expo prebuild --platform android --clean --no-install
         env:
           EXPO_NO_TELEMETRY: 1
           CI: 1
+
+      - name: Create local.properties
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+          # Cerca il primo NDK installato e aggiungilo se presente
+          NDK_DIR=$(ls -d "$ANDROID_SDK_ROOT/ndk/"* 2>/dev/null | head -1)
+          if [ -n "$NDK_DIR" ]; then
+            echo "ndk.dir=$NDK_DIR" >> android/local.properties
+            echo "NDK trovato: $NDK_DIR"
+          fi
+          cat android/local.properties
+
+      - name: Patch gradle.properties
+        run: |
+          echo "" >> android/gradle.properties
+          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" >> android/gradle.properties
+          echo "org.gradle.parallel=true" >> android/gradle.properties
+          echo "org.gradle.configureondemand=true" >> android/gradle.properties
 
       - name: Make Gradle executable
         run: chmod +x android/gradlew
@@ -58,24 +78,33 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_full.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "=== PRIMA ECCEZIONE ==="
+            grep -m1 -A20 "Caused by\|Exception\|FAILURE" /tmp/gradle_full.log || true
+            echo "=== ULTIME 50 RIGHE ==="
+            tail -50 /tmp/gradle_full.log
+            exit $EXIT_CODE
+          fi
+
+      - name: Show APK info
+        if: success()
+        run: |
+          APK=$(find android/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -1)
+          echo "✅ APK: $APK ($(du -sh "$APK" | cut -f1))"
 
       - name: Upload APK artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: wildfox3d-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
-
-      - name: Show APK info
-        run: |
-          APK=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
-          echo "✅ APK generato: $APK"
-          ls -lh "$APK"
