@@ -83,7 +83,7 @@ jobs:
         working-directory: android
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_full.log
+          ./gradlew assembleDebug -PbundleInDebug=true --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_full.log
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
             echo "=== PRIMA ECCEZIONE ==="
