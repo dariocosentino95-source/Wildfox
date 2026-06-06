@@ -37,6 +37,8 @@ if old in content:
     with open(path, "w") as f:
         f.write(content)
     print("Patch applied: removed maven publishing block from useExpoPublishing")
+elif new in content:
+    print("Patch already applied: skipping (idempotent)")
 else:
     print("ERROR: pattern not found in ExpoModulesCorePlugin.gradle")
     for i, line in enumerate(content.splitlines()):
