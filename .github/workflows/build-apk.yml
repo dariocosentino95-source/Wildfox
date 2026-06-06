@@ -44,26 +44,47 @@ jobs:
 
       - name: Patch expo-modules-core for AGP 8.x compatibility
         run: |
-          PLUGIN="node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle"
           python3 - <<'PYEOF'
 import sys
 path = "node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle"
 with open(path, "r") as f:
     content = f.read()
 
-# Fix: replace `from components.release` with a null-safe version
-# In AGP 8.x, the 'release' component is created lazily and may not be
-# available inside afterEvaluate. Wrapping in another afterEvaluate fixes it.
-old = "          from components.release"
-new = "          afterEvaluate { def c = project.components.findByName('release'); if (c != null) from c }"
+# Remove the entire afterEvaluate maven publishing block.
+# It fails with AGP 8.x (MissingPropertyException: 'release' component not yet created).
+# Maven publishing is not needed to build an APK — only for library distribution.
+old = """  afterEvaluate {
+    publishing {
+      publications {
+        release(MavenPublication) {
+          from components.release
+        }
+      }
+      repositories {
+        maven {
+          url = mavenLocal().url
+        }
+      }
+    }
+  }"""
+new = "  // afterEvaluate publishing removed: not needed for APK build, fails on AGP 8.x"
+
 if old in content:
     content = content.replace(old, new)
     with open(path, "w") as f:
         f.write(content)
-    print("✅ Patch applicata: components.release -> null-safe version")
+    print("Patch applied: removed maven publishing block from useExpoPublishing")
 else:
-    print("⚠️  Pattern non trovato, salto il patch")
-    sys.exit(0)
+    print("ERROR: pattern not found — check indentation")
+    print("File snippet around 'from components':")
+    for i, line in enumerate(content.splitlines()):
+        if "components" in line:
+            start = max(0, i-3)
+            end = min(len(content.splitlines()), i+4)
+            for j, l in enumerate(content.splitlines()[start:end], start):
+                print(f"  {j}: {repr(l)}")
+            break
+    sys.exit(1)
 PYEOF
 
       - name: Install Expo CLI
