@@ -51,11 +51,8 @@ jobs:
       - name: Bundle Three.js into viewer.html (offline support)
         run: python3 scripts/bundle-threejs.py
 
-      - name: Install Expo CLI
-        run: npm install -g @expo/cli
-
       - name: Generate native Android project (expo prebuild)
-        run: npx expo prebuild --platform android --clean --no-install
+        run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
         env:
           EXPO_NO_TELEMETRY: 1
           CI: 1
