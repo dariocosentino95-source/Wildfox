@@ -41,6 +41,7 @@ function TabNavigator() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         tabBarStyle: {
           backgroundColor: colors.tabBarBackground,
           borderTopWidth: 1,

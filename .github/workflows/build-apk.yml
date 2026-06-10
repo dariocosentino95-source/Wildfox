@@ -45,6 +45,9 @@ jobs:
       - name: Patch expo-modules-core for AGP 8.x compatibility
         run: python3 scripts/patch-expo-modules.py
 
+      - name: Bundle Three.js into viewer.html (offline support)
+        run: python3 scripts/bundle-threejs.py
+
       - name: Install Expo CLI
         run: npm install -g @expo/cli
 

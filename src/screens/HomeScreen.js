@@ -1,13 +1,13 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, memo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
   Image,
   Dimensions,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -40,7 +40,7 @@ function WildfoxLogo() {
 
 // ─── Project card ─────────────────────────────────────────────────────────────
 
-function ProjectCard({ project, onPress }) {
+const ProjectCard = memo(function ProjectCard({ project, onPress }) {
   const thumb = getModelThumbnail(project);
   const badgeColor = getFormatBadgeColor(project.format);
 
@@ -67,13 +67,14 @@ function ProjectCard({ project, onPress }) {
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [recentProjects, setRecentProjects] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
@@ -82,11 +83,14 @@ export default function HomeScreen({ navigation }) {
   );
 
   const loadRecent = async () => {
+    setIsLoading(true);
     try {
       const all = await getAllProjects();
       setRecentProjects(all.slice(0, 4));
     } catch {
       setRecentProjects([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -181,7 +185,11 @@ export default function HomeScreen({ navigation }) {
         </View>
 
         {/* Recent projects */}
-        {recentProjects.length > 0 && (
+        {isLoading ? (
+          <View style={styles.loadingSection}>
+            <ActivityIndicator size="small" color={colors.accent} />
+          </View>
+        ) : recentProjects.length > 0 ? (
           <View style={styles.recentSection}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Recenti</Text>
@@ -200,10 +208,10 @@ export default function HomeScreen({ navigation }) {
               ))}
             </View>
           </View>
-        )}
+        ) : null}
 
         {/* Empty state */}
-        {recentProjects.length === 0 && (
+        {!isLoading && recentProjects.length === 0 && (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconWrap}>
               <Ionicons name="cube-outline" size={48} color={colors.accentMuted} />
@@ -464,6 +472,10 @@ const styles = StyleSheet.create({
   projectDate: {
     color: colors.textMuted,
     fontSize: 10,
+  },
+  loadingSection: {
+    paddingTop: 40,
+    alignItems: 'center',
   },
   emptyState: {
     alignItems: 'center',

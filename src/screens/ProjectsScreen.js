@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, memo, useMemo } from 'react';
 import {
   View,
   Text,
@@ -34,7 +34,7 @@ import {
 
 // ─── ProjectCard ──────────────────────────────────────────────────────────────
 
-function ProjectCard({ project, onPress, onLongPress }) {
+const ProjectCard = memo(function ProjectCard({ project, onPress, onLongPress }) {
   const thumb = getModelThumbnail(project);
   const badgeColor = getFormatBadgeColor(project.format);
   const stats = formatModelStats(project.stats);
@@ -96,7 +96,7 @@ function ProjectCard({ project, onPress, onLongPress }) {
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── EmptyState ────────────────────────────────────────────────────────────────
 
@@ -166,8 +166,9 @@ export default function ProjectsScreen() {
     setRefreshing(false);
   };
 
-  const filteredProjects = projects.filter((p) =>
-    !search || p.name?.toLowerCase().includes(search.toLowerCase()),
+  const filteredProjects = useMemo(
+    () => projects.filter((p) => !search || p.name?.toLowerCase().includes(search.toLowerCase())),
+    [projects, search],
   );
 
   const handleOpen = (project) => {
@@ -349,6 +350,10 @@ export default function ProjectsScreen() {
         }
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={8}
+        windowSize={5}
+        initialNumToRender={10}
       />
 
       {/* Rename modal (Android) */}

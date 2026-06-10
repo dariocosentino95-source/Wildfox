@@ -253,7 +253,7 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
         backgroundColor={colors.background}
         renderToHardwareTextureAndroid={true}
         androidLayerType="hardware"
-        cacheEnabled={false}
+        cacheEnabled={true}
         incognito={false}
       />
 
