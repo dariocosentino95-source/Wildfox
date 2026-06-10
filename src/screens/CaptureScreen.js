@@ -57,7 +57,11 @@ export default function CaptureScreen() {
   const [isReady, setIsReady] = useState(false);
   const [mountError, setMountError] = useState(null);
 
-  const recordingTimerRef = useRef(null);
+  // ── Fallback: segna la camera come pronta dopo 2s se onCameraReady non scatta
+  useEffect(() => {
+    const t = setTimeout(() => setIsReady(true), 2000);
+    return () => clearTimeout(t);
+  }, []);
 
   // ── Permissions ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -83,7 +87,7 @@ export default function CaptureScreen() {
 
   // ── Take photo ─────────────────────────────────────────────────────────────
   const handleTakePhoto = useCallback(async () => {
-    if (!cameraRef.current || isTakingPhoto || !isReady) return;
+    if (!cameraRef.current || isTakingPhoto) return;
     setIsTakingPhoto(true);
     try {
       const photo = await cameraRef.current.takePictureAsync({
@@ -91,18 +95,18 @@ export default function CaptureScreen() {
         exif: false,
         skipProcessing: Platform.OS === 'android',
       });
-      setCapturedPhotos((prev) => [...prev, photo.uri]);
+      if (photo?.uri) setCapturedPhotos((prev) => [...prev, photo.uri]);
     } catch (err) {
       console.error('[CaptureScreen] takePicture error:', err);
       Alert.alert('Errore', 'Impossibile scattare la foto. Riprova.');
     } finally {
       setIsTakingPhoto(false);
     }
-  }, [isTakingPhoto, isReady]);
+  }, [isTakingPhoto]);
 
   // ── Start/stop recording ───────────────────────────────────────────────────
   const handleRecordToggle = useCallback(async () => {
-    if (!cameraRef.current || !isReady) return;
+    if (!cameraRef.current) return;
     if (isRecording) {
       cameraRef.current.stopRecording();
       setIsRecording(false);
@@ -293,7 +297,7 @@ export default function CaptureScreen() {
             <TouchableOpacity
               style={[styles.shutterBtn, isTakingPhoto && styles.shutterBtnActive]}
               onPress={handleTakePhoto}
-              disabled={isTakingPhoto || !isReady}
+              disabled={isTakingPhoto}
             >
               <View style={styles.shutterInner} />
             </TouchableOpacity>
@@ -301,7 +305,7 @@ export default function CaptureScreen() {
             <TouchableOpacity
               style={[styles.shutterBtn, isRecording && styles.shutterBtnRecording]}
               onPress={handleRecordToggle}
-              disabled={!isReady}
+
             >
               <View style={[styles.shutterInner, isRecording && styles.shutterInnerRecording]} />
             </TouchableOpacity>
