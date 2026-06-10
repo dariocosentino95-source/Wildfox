@@ -55,6 +55,7 @@ export default function CaptureScreen() {
   const [isTakingPhoto, setIsTakingPhoto] = useState(false);
   const [showGuide, setShowGuide] = useState(true);
   const [isReady, setIsReady] = useState(false);
+  const [mountError, setMountError] = useState(null);
 
   const recordingTimerRef = useRef(null);
 
@@ -111,7 +112,6 @@ export default function CaptureScreen() {
       try {
         const video = await cameraRef.current.recordAsync({
           maxDuration: 300,
-          quality: '720p',
         });
         setVideoUri(video.uri);
         setIsRecording(false);
@@ -169,6 +169,19 @@ export default function CaptureScreen() {
     );
   }
 
+  if (mountError) {
+    return (
+      <View style={styles.permissionContainer}>
+        <Ionicons name="alert-circle-outline" size={56} color={colors.error} />
+        <Text style={styles.permissionTitle}>Fotocamera non disponibile</Text>
+        <Text style={styles.permissionSubtext}>{mountError}</Text>
+        <TouchableOpacity style={styles.permissionBtn} onPress={() => navigation.goBack()}>
+          <Text style={styles.permissionBtnText}>Torna indietro</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (!cameraPermission.granted) {
     return (
       <View style={styles.permissionContainer}>
@@ -198,8 +211,7 @@ export default function CaptureScreen() {
         flash={flash}
         mode={captureMode}
         onCameraReady={() => setIsReady(true)}
-        videoQuality="720p"
-        videoStabilizationMode="auto"
+        onMountError={(e) => setMountError(e?.message || 'Errore fotocamera')}
       />
 
       {/* Top bar */}
