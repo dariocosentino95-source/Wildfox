@@ -57,6 +57,8 @@ export default function CaptureScreen() {
   const [isReady, setIsReady] = useState(false);
   const [mountError, setMountError] = useState(null);
 
+  const recordingTimerRef = useRef(null);
+
   // ── Fallback: segna la camera come pronta dopo 2s se onCameraReady non scatta
   useEffect(() => {
     const t = setTimeout(() => setIsReady(true), 2000);
