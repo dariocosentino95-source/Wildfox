@@ -8,11 +8,11 @@ import sys
 import time
 
 CDN_SCRIPTS = [
-    "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js",
-    "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js",
-    "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js",
-    "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/OBJLoader.js",
-    "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/STLLoader.js",
+    "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js",
+    "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js",
+    "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js",
+    "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js",
+    "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js",
 ]
 
 VIEWER_PATH = "src/assets/viewer.html"
