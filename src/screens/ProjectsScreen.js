@@ -68,7 +68,12 @@ const ProjectCard = memo(function ProjectCard({ project, onPress, onLongPress })
       <View style={styles.cardInfo}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardName} numberOfLines={1}>{project.name}</Text>
-          <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
+          <TouchableOpacity
+            onPress={() => onLongPress(project)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.cardDate}>{formatDate(project.updatedAt || project.createdAt)}</Text>
@@ -142,6 +147,7 @@ export default function ProjectsScreen() {
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [renameModal, setRenameModal] = useState({ visible: false, project: null, value: '' });
+  const [actionMenu, setActionMenu] = useState({ visible: false, project: null });
 
   const searchRef = useRef(null);
 
@@ -193,20 +199,19 @@ export default function ProjectsScreen() {
         },
       );
     } else {
-      // Android - use Alert with buttons
-      Alert.alert(
-        project.name,
-        'Seleziona un\'azione:',
-        [
-          { text: 'Annulla', style: 'cancel' },
-          { text: 'Apri', onPress: () => handleOpen(project) },
-          { text: 'Rinomina', onPress: () => handleRename(project) },
-          { text: 'Esporta', onPress: () => handleExport(project) },
-          { text: 'Condividi', onPress: () => handleShare(project) },
-          { text: 'Elimina', style: 'destructive', onPress: () => handleDelete(project) },
-        ],
-      );
+      // Android: Alert supporta max 3 pulsanti, quindi usiamo un bottom sheet
+      setActionMenu({ visible: true, project });
     }
+  };
+
+  const closeActionMenu = () => setActionMenu({ visible: false, project: null });
+
+  const runMenuAction = (action) => {
+    const project = actionMenu.project;
+    closeActionMenu();
+    if (!project) return;
+    // Lascia chiudere il modal prima di aprire Alert/ActionSheet successivi
+    setTimeout(() => action(project), 150);
   };
 
   const handleDelete = (project) => {
@@ -356,6 +361,53 @@ export default function ProjectsScreen() {
         initialNumToRender={10}
       />
 
+      {/* Action menu bottom sheet (Android) */}
+      <Modal
+        visible={actionMenu.visible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeActionMenu}
+      >
+        <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={closeActionMenu}>
+          <View style={styles.menuSheet}>
+            <View style={styles.menuHandle} />
+            <Text style={styles.menuTitle} numberOfLines={1}>
+              {actionMenu.project?.name}
+            </Text>
+
+            {[
+              { icon: 'cube-outline', label: 'Apri', action: handleOpen },
+              { icon: 'pencil-outline', label: 'Rinomina', action: handleRename },
+              { icon: 'download-outline', label: 'Esporta', action: handleExport },
+              { icon: 'share-social-outline', label: 'Condividi', action: handleShare },
+            ].map((item) => (
+              <TouchableOpacity
+                key={item.label}
+                style={styles.menuItem}
+                onPress={() => runMenuAction(item.action)}
+              >
+                <Ionicons name={item.icon} size={20} color={colors.textSecondary} />
+                <Text style={styles.menuItemText}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <View style={styles.menuDivider} />
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => runMenuAction(handleDelete)}
+            >
+              <Ionicons name="trash-outline" size={20} color={colors.error} />
+              <Text style={[styles.menuItemText, { color: colors.error }]}>Elimina</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.menuCancelBtn} onPress={closeActionMenu}>
+              <Text style={styles.menuCancelText}>Annulla</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Rename modal (Android) */}
       <Modal
         visible={renameModal.visible}
@@ -397,6 +449,68 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  menuSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 28,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  menuHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.borderLight,
+    alignSelf: 'center',
+    marginBottom: 10,
+  },
+  menuTitle: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 24,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 8,
+  },
+  menuItemText: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: 4,
+  },
+  menuCancelBtn: {
+    marginTop: 10,
+    backgroundColor: colors.backgroundTertiary,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  menuCancelText: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',
