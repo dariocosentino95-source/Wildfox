@@ -639,6 +639,27 @@
               loadModel(msg.uri, msg.format);
               break;
 
+            case 'loadModelContent':
+              // Content passed directly from RN (avoids file:// XHR restriction on Android)
+              (function() {
+                try {
+                  var fmt = (msg.format || 'gltf').toLowerCase();
+                  var mime = fmt === 'obj' ? 'model/obj' : fmt === 'stl' ? 'model/stl' : 'model/gltf+json';
+                  var blob = new Blob([msg.content], { type: mime });
+                  var blobUrl = URL.createObjectURL(blob);
+                  if (fmt === 'obj') {
+                    loadOBJ(blobUrl);
+                  } else if (fmt === 'stl') {
+                    loadSTL(blobUrl);
+                  } else {
+                    loadGLTF(blobUrl);
+                  }
+                } catch (e) {
+                  postToRN({ type: 'modelError', error: e.message });
+                }
+              })();
+              break;
+
             case 'setMode':
               var validModes = ['view', 'select', 'annotate'];
               if (validModes.indexOf(msg.mode) >= 0) {

@@ -59,11 +59,12 @@ export default function CaptureScreen() {
 
   const recordingTimerRef = useRef(null);
 
-  // ── Fallback: segna la camera come pronta dopo 2s se onCameraReady non scatta
+  // ── Reset readiness whenever captureMode changes (CameraView remounts via key)
   useEffect(() => {
+    setIsReady(false);
     const t = setTimeout(() => setIsReady(true), 2000);
     return () => clearTimeout(t);
-  }, []);
+  }, [captureMode]);
 
   // ── Permissions ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -119,11 +120,17 @@ export default function CaptureScreen() {
         const video = await cameraRef.current.recordAsync({
           maxDuration: 300,
         });
-        setVideoUri(video.uri);
+        if (video?.uri) {
+          setVideoUri(video.uri);
+        }
         setIsRecording(false);
       } catch (err) {
         console.error('[CaptureScreen] recordAsync error:', err);
         setIsRecording(false);
+        Alert.alert(
+          'Errore registrazione',
+          err?.message || 'Impossibile avviare la registrazione. Attendi che la fotocamera sia pronta e riprova.',
+        );
       }
     }
   }, [isRecording, isReady]);
@@ -209,8 +216,10 @@ export default function CaptureScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Camera */}
+      {/* Camera — key forces full remount when mode changes so Android
+           reinitializes native camera in the correct capture mode */}
       <CameraView
+        key={captureMode}
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         facing={facing}
@@ -305,9 +314,13 @@ export default function CaptureScreen() {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={[styles.shutterBtn, isRecording && styles.shutterBtnRecording]}
+              style={[
+                styles.shutterBtn,
+                isRecording && styles.shutterBtnRecording,
+                (!isReady && !isRecording) && styles.shutterBtnDisabled,
+              ]}
               onPress={handleRecordToggle}
-
+              disabled={!isReady && !isRecording}
             >
               <View style={[styles.shutterInner, isRecording && styles.shutterInnerRecording]} />
             </TouchableOpacity>
@@ -526,6 +539,10 @@ const styles = StyleSheet.create({
   },
   shutterBtnRecording: {
     borderColor: colors.error,
+  },
+  shutterBtnDisabled: {
+    borderColor: colors.textDisabled,
+    opacity: 0.45,
   },
   shutterInner: {
     width: 58,

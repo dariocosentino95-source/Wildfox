@@ -14,6 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import * as FileSystem from 'expo-file-system';
 import colors from '../theme/colors';
 
 // Load the viewer HTML as a static asset.
@@ -84,12 +85,33 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
     webViewRef.current.injectJavaScript(js);
   }, []);
 
+  // ── Load a model, reading file content for local file:// URIs ─────────────
+  // Android WebView cannot fetch file:// URIs via XHR from non-file origins,
+  // so we read the file in React Native and pass content directly.
+  const sendLoadModel = useCallback((uri, fmt) => {
+    if (!uri) return;
+    const fmtLower = (fmt || format).toLowerCase();
+    const isLocal = uri.startsWith('file://') || uri.startsWith('/');
+
+    if (isLocal && (fmtLower === 'gltf' || fmtLower === 'obj' || fmtLower === 'stl')) {
+      FileSystem.readAsStringAsync(uri)
+        .then((content) => {
+          sendCommand({ type: 'loadModelContent', content, format: fmtLower });
+        })
+        .catch(() => {
+          sendCommand({ type: 'loadModel', uri, format: fmtLower });
+        });
+    } else {
+      sendCommand({ type: 'loadModel', uri, format: fmtLower });
+    }
+  }, [sendCommand, format]);
+
   // ── Expose methods via ref ────────────────────────────────────────────────
   useImperativeHandle(
     ref,
     () => ({
       loadModel: (uri, fmt) => {
-        sendCommand({ type: 'loadModel', uri, format: fmt || format });
+        sendLoadModel(uri, fmt);
       },
       setMode: (newMode) => {
         sendCommand({ type: 'setMode', mode: newMode });
@@ -124,16 +146,16 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
         sendCommand({ type: 'resetCamera' });
       },
     }),
-    [sendCommand, format],
+    [sendCommand, sendLoadModel, format],
   );
 
   // ── When modelUri / mode changes, push to WebView ─────────────────────────
   useEffect(() => {
     if (!viewerReady) return;
     if (modelUri) {
-      sendCommand({ type: 'loadModel', uri: modelUri, format });
+      sendLoadModel(modelUri, format);
     }
-  }, [viewerReady, modelUri, format, sendCommand]);
+  }, [viewerReady, modelUri, format, sendLoadModel]);
 
   useEffect(() => {
     if (!viewerReady) return;
@@ -150,9 +172,8 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
             setViewerReady(true);
             setIsLoading(false);
             if (onViewerReady) onViewerReady();
-            // Load model if already set
             if (modelUri) {
-              sendCommand({ type: 'loadModel', uri: modelUri, format });
+              sendLoadModel(modelUri, format);
             }
             sendCommand({ type: 'setMode', mode });
             break;
@@ -207,7 +228,7 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
         // Ignore parse errors
       }
     },
-    [onViewerReady, onModelLoaded, onAreaSelected, onAnnotationPlaced, onError, modelUri, format, mode, sendCommand],
+    [onViewerReady, onModelLoaded, onAreaSelected, onAnnotationPlaced, onError, modelUri, format, mode, sendCommand, sendLoadModel],
   );
 
   // ── WebView error ─────────────────────────────────────────────────────────

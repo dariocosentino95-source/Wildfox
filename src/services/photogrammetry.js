@@ -128,59 +128,6 @@ export async function reconstructModel(imageUris, options = {}) {
     throw new Error('Nessuna immagine fornita per la ricostruzione.');
   }
 
-  let usedApi = false;
-
-  // Attempt real API call if network is presumably available
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-    // Test connectivity by pinging the endpoint (short timeout)
-    const testResponse = await fetch(_apiEndpoint, {
-      method: 'HEAD',
-      signal: controller.signal,
-    }).catch(() => null);
-
-    clearTimeout(timeoutId);
-
-    if (testResponse && testResponse.ok) {
-      // Build form data with images
-      const formData = new FormData();
-      imageUris.forEach((uri, idx) => {
-        const filename = uri.split('/').pop() || `image_${idx}.jpg`;
-        formData.append('images', {
-          uri,
-          name: filename,
-          type: 'image/jpeg',
-        });
-      });
-      formData.append('output_format', 'gltf');
-      formData.append('quality', 'high');
-
-      const response = await fetch(_apiEndpoint, {
-        method: 'POST',
-        body: formData,
-        signal: signal || undefined,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        usedApi = true;
-        return {
-          modelUri: data.modelUri || data.model_uri,
-          format: data.format || 'gltf',
-          stats: data.stats || { vertexCount: 0, faceCount: 0, textureCount: 0 },
-          source: 'api',
-        };
-      }
-    }
-  } catch (apiErr) {
-    // Fall through to mock processing
-    if (apiErr.name === 'AbortError') {
-      throw new Error('Ricostruzione annullata.');
-    }
-  }
-
   // ─── Mock processing pipeline ──────────────────────────────────────────────
   const totalStages = PROCESSING_STAGES.length;
 
@@ -228,7 +175,6 @@ export async function reconstructModel(imageUris, options = {}) {
     format: 'gltf',
     stats,
     source: 'mock',
-    usedApi,
   };
 }
 
