@@ -59,10 +59,18 @@ export default function CaptureScreen() {
 
   const recordingTimerRef = useRef(null);
 
-  // ── Reset readiness whenever captureMode changes (CameraView remounts via key)
+  // ── Fallback: segna la camera come pronta dopo 2s se onCameraReady non scatta
   useEffect(() => {
-    setIsReady(false);
     const t = setTimeout(() => setIsReady(true), 2000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // ── Quando cambia modalità, resetta eventuali errori e attendi che la camera
+  // si riadatti prima di abilitare il pulsante di registrazione
+  useEffect(() => {
+    setMountError(null);
+    setIsReady(false);
+    const t = setTimeout(() => setIsReady(true), 1500);
     return () => clearTimeout(t);
   }, [captureMode]);
 
@@ -216,10 +224,8 @@ export default function CaptureScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Camera — key forces full remount when mode changes so Android
-           reinitializes native camera in the correct capture mode */}
+      {/* Camera */}
       <CameraView
-        key={captureMode}
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         facing={facing}
