@@ -88,15 +88,25 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
   // ── Load a model, reading file content for local file:// URIs ─────────────
   // Android WebView cannot fetch file:// URIs via XHR from non-file origins,
   // so we read the file in React Native and pass content directly.
+  // STL/GLB possono essere binari: vanno letti come base64 per non corrompere i byte.
   const sendLoadModel = useCallback((uri, fmt) => {
     if (!uri) return;
     const fmtLower = (fmt || format).toLowerCase();
     const isLocal = uri.startsWith('file://') || uri.startsWith('/');
+    const isBinary = fmtLower === 'stl' || fmtLower === 'glb';
 
-    if (isLocal && (fmtLower === 'gltf' || fmtLower === 'obj' || fmtLower === 'stl')) {
-      FileSystem.readAsStringAsync(uri)
+    if (isLocal && (fmtLower === 'gltf' || fmtLower === 'obj' || isBinary)) {
+      FileSystem.readAsStringAsync(
+        uri,
+        isBinary ? { encoding: FileSystem.EncodingType.Base64 } : undefined,
+      )
         .then((content) => {
-          sendCommand({ type: 'loadModelContent', content, format: fmtLower });
+          sendCommand({
+            type: 'loadModelContent',
+            content,
+            format: fmtLower,
+            encoding: isBinary ? 'base64' : 'utf8',
+          });
         })
         .catch(() => {
           sendCommand({ type: 'loadModel', uri, format: fmtLower });

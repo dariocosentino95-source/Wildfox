@@ -78,7 +78,7 @@
     <div id="loading-screen">
       <div class="spinner"></div>
       <div class="loading-text">Caricamento viewer 3D...</div>
-      <div class="loading-sub">Three.js r158</div>
+      <div class="loading-sub">Three.js r128</div>
     </div>
     <div id="offline-screen">
       <div class="offline-icon">📡</div>
@@ -640,12 +640,25 @@
               break;
 
             case 'loadModelContent':
-              // Content passed directly from RN (avoids file:// XHR restriction on Android)
+              // Content passed directly from RN (avoids file:// XHR restriction on Android).
+              // encoding 'base64' is used for binary formats (STL/GLB).
               (function() {
                 try {
                   var fmt = (msg.format || 'gltf').toLowerCase();
-                  var mime = fmt === 'obj' ? 'model/obj' : fmt === 'stl' ? 'model/stl' : 'model/gltf+json';
-                  var blob = new Blob([msg.content], { type: mime });
+                  var mime = fmt === 'obj' ? 'model/obj'
+                    : fmt === 'stl' ? 'model/stl'
+                    : fmt === 'glb' ? 'model/gltf-binary'
+                    : 'model/gltf+json';
+                  var payload = msg.content;
+                  if (msg.encoding === 'base64') {
+                    var bin = atob(msg.content);
+                    var bytes = new Uint8Array(bin.length);
+                    for (var bi = 0; bi < bin.length; bi++) {
+                      bytes[bi] = bin.charCodeAt(bi);
+                    }
+                    payload = bytes.buffer;
+                  }
+                  var blob = new Blob([payload], { type: mime });
                   var blobUrl = URL.createObjectURL(blob);
                   if (fmt === 'obj') {
                     loadOBJ(blobUrl);

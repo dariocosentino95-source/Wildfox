@@ -309,7 +309,7 @@ export default function SettingsScreen() {
           <View style={styles.rowDivider} />
           <View style={styles.aboutRow}>
             <Text style={styles.aboutLabel}>Rendering 3D</Text>
-            <Text style={styles.aboutValue}>Three.js r158</Text>
+            <Text style={styles.aboutValue}>Three.js r128</Text>
           </View>
           <View style={styles.rowDivider} />
           <View style={styles.aboutRow}>

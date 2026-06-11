@@ -11,7 +11,7 @@ import {
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera/next';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import * as MediaLibrary from 'expo-media-library';
 import colors from '../theme/colors';
 import CaptureGuide from '../components/CaptureGuide';
@@ -38,6 +38,7 @@ function RecordingTimer({ seconds }) {
 export default function CaptureScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -56,23 +57,18 @@ export default function CaptureScreen() {
   const [showGuide, setShowGuide] = useState(true);
   const [isReady, setIsReady] = useState(false);
   const [mountError, setMountError] = useState(null);
+  const [retryAttempt, setRetryAttempt] = useState(0);
 
   const recordingTimerRef = useRef(null);
+  const autoStopRef = useRef(null);
 
-  // ── Fallback: segna la camera come pronta dopo 2s se onCameraReady non scatta
+  // ── Readiness: si azzera a ogni cambio modalità / ritorno in focus / retry,
+  // con fallback a 2s nel caso onCameraReady non scatti su alcuni dispositivi
   useEffect(() => {
+    setIsReady(false);
     const t = setTimeout(() => setIsReady(true), 2000);
     return () => clearTimeout(t);
-  }, []);
-
-  // ── Quando cambia modalità, resetta eventuali errori e attendi che la camera
-  // si riadatti prima di abilitare il pulsante di registrazione
-  useEffect(() => {
-    setMountError(null);
-    setIsReady(false);
-    const t = setTimeout(() => setIsReady(true), 1500);
-    return () => clearTimeout(t);
-  }, [captureMode]);
+  }, [captureMode, isFocused, retryAttempt]);
 
   // ── Permissions ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -119,29 +115,51 @@ export default function CaptureScreen() {
   const handleRecordToggle = useCallback(async () => {
     if (!cameraRef.current) return;
     if (isRecording) {
+      clearTimeout(autoStopRef.current);
       cameraRef.current.stopRecording();
-      setIsRecording(false);
-    } else {
-      setIsRecording(true);
-      setVideoUri(null);
-      try {
-        const video = await cameraRef.current.recordAsync({
-          maxDuration: 300,
-        });
-        if (video?.uri) {
-          setVideoUri(video.uri);
-        }
-        setIsRecording(false);
-      } catch (err) {
-        console.error('[CaptureScreen] recordAsync error:', err);
-        setIsRecording(false);
+      // recordAsync risolverà e aggiornerà videoUri/isRecording
+      return;
+    }
+
+    // Il modulo nativo rifiuta recordAsync se manca il permesso microfono
+    if (!micPermission?.granted) {
+      const res = await requestMicPermission();
+      if (!res?.granted) {
         Alert.alert(
-          'Errore registrazione',
-          err?.message || 'Impossibile avviare la registrazione. Attendi che la fotocamera sia pronta e riprova.',
+          'Microfono richiesto',
+          'Per registrare video serve il permesso del microfono. Abilitalo nelle impostazioni di sistema.',
         );
+        return;
       }
     }
-  }, [isRecording, isReady]);
+
+    setIsRecording(true);
+    setVideoUri(null);
+    // Limite di 5 minuti gestito lato JS: l'opzione nativa maxDuration in
+    // expo-camera 14 interpreta i secondi come millisecondi e fa fallire
+    // la registrazione, quindi non va passata.
+    autoStopRef.current = setTimeout(() => {
+      cameraRef.current?.stopRecording();
+    }, 300 * 1000);
+    try {
+      const video = await cameraRef.current.recordAsync();
+      if (video?.uri) {
+        setVideoUri(video.uri);
+      }
+    } catch (err) {
+      console.error('[CaptureScreen] recordAsync error:', err);
+      Alert.alert(
+        'Errore registrazione',
+        err?.message || 'Impossibile avviare la registrazione. Riprova tra qualche istante.',
+      );
+    } finally {
+      clearTimeout(autoStopRef.current);
+      setIsRecording(false);
+    }
+  }, [isRecording, micPermission, requestMicPermission]);
+
+  // Pulisce il timer di auto-stop allo smontaggio
+  useEffect(() => () => clearTimeout(autoStopRef.current), []);
 
   // ── Process ────────────────────────────────────────────────────────────────
   const handleProcess = useCallback(() => {
@@ -196,8 +214,18 @@ export default function CaptureScreen() {
         <Ionicons name="alert-circle-outline" size={56} color={colors.error} />
         <Text style={styles.permissionTitle}>Fotocamera non disponibile</Text>
         <Text style={styles.permissionSubtext}>{mountError}</Text>
-        <TouchableOpacity style={styles.permissionBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.permissionBtnText}>Torna indietro</Text>
+        <TouchableOpacity
+          style={styles.permissionBtn}
+          onPress={() => {
+            setMountError(null);
+            setIsReady(false);
+            setRetryAttempt((c) => c + 1);
+          }}
+        >
+          <Text style={styles.permissionBtnText}>Riprova</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Text style={styles.permissionLinkText}>Torna indietro</Text>
         </TouchableOpacity>
       </View>
     );
@@ -224,16 +252,25 @@ export default function CaptureScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Camera */}
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing={facing}
-        flash={flash}
-        mode={captureMode}
-        onCameraReady={() => setIsReady(true)}
-        onMountError={(e) => setMountError(e?.message || 'Errore fotocamera')}
-      />
+      {/* Camera — montata solo quando lo screen è in focus, così il nativo
+           rilascia la fotocamera quando si naviga a Processing/Viewer.
+           L'enum nativo CameraMode accetta solo 'picture' | 'video'
+           ('photo' non è valido e il cast nativo fallirebbe in silenzio).
+           Il wrapper JS di expo-camera 14 non rinomina flash→flashMode,
+           quindi passiamo direttamente flashMode come si aspetta il nativo. */}
+      {isFocused && (
+        <CameraView
+          key={`cam_${retryAttempt}`}
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing={facing}
+          flash={flash}
+          flashMode={flash}
+          mode={captureMode === 'video' ? 'video' : 'picture'}
+          onCameraReady={() => setIsReady(true)}
+          onMountError={(e) => setMountError(e?.message || 'Errore fotocamera')}
+        />
+      )}
 
       {/* Top bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
@@ -411,6 +448,12 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 15,
     fontWeight: '700',
+  },
+  permissionLinkText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: '600',
+    padding: 8,
   },
   topBar: {
     position: 'absolute',

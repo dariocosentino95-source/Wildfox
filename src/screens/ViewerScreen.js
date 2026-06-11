@@ -33,6 +33,7 @@ export default function ViewerScreen() {
   const [notesVisible, setNotesVisible] = useState(false);
   const [exportVisible, setExportVisible] = useState(false);
   const [isModelLoaded, setIsModelLoaded] = useState(false);
+  const [viewerError, setViewerError] = useState(null);
   const [brightness, setBrightness] = useState(1.0);
   const [opacity, setOpacity] = useState(1.0);
   const [showSliders, setShowSliders] = useState(false);
@@ -172,9 +173,29 @@ export default function ViewerScreen() {
         mode={viewMode}
         onAreaSelected={handleAreaSelected}
         onAnnotationPlaced={handleAnnotationPlaced}
-        onModelLoaded={() => setIsModelLoaded(true)}
+        onModelLoaded={() => {
+          setIsModelLoaded(true);
+          setViewerError(null);
+        }}
+        onError={({ message }) => setViewerError(message || 'Errore caricamento modello')}
         style={StyleSheet.absoluteFill}
       />
+
+      {/* Banner errore caricamento modello */}
+      {viewerError && (
+        <View style={[styles.errorBanner, { top: insets.top + 64 }]}>
+          <Ionicons name="alert-circle" size={15} color={colors.error} />
+          <Text style={styles.errorBannerText} numberOfLines={2}>
+            {`Modello non caricato: ${viewerError}`}
+          </Text>
+          <TouchableOpacity
+            onPress={() => setViewerError(null)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="close" size={15} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Top toolbar */}
       <View style={[styles.topBar, { paddingTop: insets.top + 4 }]}>
@@ -349,6 +370,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     padding: 32,
+  },
+  errorBanner: {
+    position: 'absolute',
+    left: 12,
+    right: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.error + '66',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    zIndex: 20,
+  },
+  errorBannerText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    flex: 1,
   },
   errorText: {
     color: colors.textSecondary,

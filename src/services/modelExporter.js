@@ -231,8 +231,8 @@ function buildGltfContent() {
           name: 'ReconstructedMesh',
           primitives: [
             {
-              attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 },
-              indices: 3,
+              attributes: { POSITION: 0, NORMAL: 1 },
+              indices: 2,
               material: 0,
               mode: 4,
             },
@@ -253,16 +253,19 @@ function buildGltfContent() {
       accessors: [
         { bufferView: 0, componentType: 5126, count: 24, type: 'VEC3', max: [0.5, 0.5, 0.5], min: [-0.5, -0.5, -0.5] },
         { bufferView: 1, componentType: 5126, count: 24, type: 'VEC3' },
-        { bufferView: 2, componentType: 5126, count: 24, type: 'VEC2' },
-        { bufferView: 3, componentType: 5123, count: 36, type: 'SCALAR' },
+        { bufferView: 2, componentType: 5123, count: 36, type: 'SCALAR' },
       ],
       bufferViews: [
         { buffer: 0, byteOffset: 0, byteLength: 288, target: 34962 },
         { buffer: 0, byteOffset: 288, byteLength: 288, target: 34962 },
-        { buffer: 0, byteOffset: 576, byteLength: 192, target: 34962 },
-        { buffer: 0, byteOffset: 768, byteLength: 72, target: 34963 },
+        { buffer: 0, byteOffset: 576, byteLength: 72, target: 34963 },
       ],
-      buffers: [{ byteLength: 840 }],
+      // Buffer embedded (posizioni + normali + indici del cubo) così il file
+      // esportato è autosufficiente e apribile da qualsiasi software 3D
+      buffers: [{
+        byteLength: 648,
+        uri: 'data:application/octet-stream;base64,AAAAvwAAAL8AAAA/AAAAPwAAAL8AAAA/AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/AAAAPwAAAL8AAAC/AAAAvwAAAL8AAAC/AAAAvwAAAD8AAAC/AAAAPwAAAD8AAAC/AAAAvwAAAL8AAAC/AAAAvwAAAL8AAAA/AAAAvwAAAD8AAAA/AAAAvwAAAD8AAAC/AAAAPwAAAL8AAAA/AAAAPwAAAL8AAAC/AAAAPwAAAD8AAAC/AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/AAAAPwAAAD8AAAA/AAAAPwAAAD8AAAC/AAAAvwAAAD8AAAC/AAAAvwAAAL8AAAC/AAAAPwAAAL8AAAC/AAAAPwAAAL8AAAA/AAAAvwAAAL8AAAA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAABAAIAAAACAAMABAAFAAYABAAGAAcACAAJAAoACAAKAAsADAANAA4ADAAOAA8AEAARABIAEAASABMAFAAVABYAFAAWABcA',
+      }],
     },
     null,
     2,
