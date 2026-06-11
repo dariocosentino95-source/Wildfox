@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const SEMI = ["♠", "♥", "♦", "♣"];
 const SEMI_COLORS = ["#2c2c2c", "#8B1A1A", "#C9A84C", "#1B4332"];
@@ -384,7 +384,7 @@ const thStyle = { padding: "6px 8px", textAlign: "left", fontSize: 11, fontWeigh
   borderBottom: "2px solid rgba(0,0,0,0.08)", whiteSpace: "nowrap" };
 const tdStyle = { padding: "5px 8px", fontSize: 12, fontFamily: "Georgia, serif", whiteSpace: "nowrap" };
 
-function ClassificaTab({ players, rounds, stats, sessioni }) {
+function ClassificaTab({ players, rounds, stats, sessioni, onEditRound }) {
   const [subTab, setSubTab] = useState("generale");
   const sorted = [...players].sort((a, b) => (stats[b.id]?.puntiTotali ?? 0) - (stats[a.id]?.puntiTotali ?? 0));
   const compagniSorted = [...players].sort((a, b) => (stats[b.id]?.compagnoVinto ?? 0) - (stats[a.id]?.compagnoVinto ?? 0));
@@ -539,7 +539,12 @@ function ClassificaTab({ players, rounds, stats, sessioni }) {
 
       {subTab === "storico" && (
         <div style={sectionStyle}>
-          <div style={{ fontSize: 10, letterSpacing: 3, color: "#888", textTransform: "uppercase", marginBottom: 14 }}>Storico Mani</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontSize: 10, letterSpacing: 3, color: "#888", textTransform: "uppercase" }}>Storico Mani</div>
+            {rounds.length > 0 && onEditRound && (
+              <span style={{ fontSize: 10, color: "#aaa", fontFamily: "Georgia, serif" }}>tocca ✎ per correggere</span>
+            )}
+          </div>
           {rounds.length === 0 ? (
             <div style={{ textAlign: "center", color: "#bbb", fontSize: 13 }}>Nessuna mano registrata</div>
           ) : (
@@ -556,6 +561,7 @@ function ClassificaTab({ players, rounds, stats, sessioni }) {
                         <span style={{ color: SEMI_COLORS[i % 4], marginRight: 2 }}>{SEMI[i % 4]}</span>{p.name}
                       </th>
                     ))}
+                    {onEditRound && <th style={thStyle}></th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -580,6 +586,13 @@ function ClassificaTab({ players, rounds, stats, sessioni }) {
                             </td>
                           );
                         })}
+                        {onEditRound && (
+                          <td style={{ ...tdStyle, textAlign: "center" }}>
+                            <button onClick={() => onEditRound(r)}
+                              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15, color: PALETTE.feltro, padding: "2px 4px" }}
+                              title="Modifica o annulla questa mano">✎</button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -616,6 +629,85 @@ function saveSessione(sessione) {
   const sessioni = loadSessioni();
   sessioni.unshift(sessione);
   localStorage.setItem("briscola_sessioni", JSON.stringify(sessioni.slice(0, 30)));
+}
+function deleteSessione(id) {
+  const sessioni = loadSessioni().filter(s => s.id !== id);
+  localStorage.setItem("briscola_sessioni", JSON.stringify(sessioni));
+  return sessioni;
+}
+
+// ── Persistenza partita in corso (auto-save alla chiusura) ────────────────────
+const PARTITA_KEY = "briscola_partita_corrente";
+function loadPartita() {
+  try {
+    const raw = localStorage.getItem(PARTITA_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (p && p.gameStarted && Array.isArray(p.players) && p.players.length > 0) return p;
+    return null;
+  } catch { return null; }
+}
+function savePartita(state) {
+  try {
+    if (state && state.gameStarted) localStorage.setItem(PARTITA_KEY, JSON.stringify(state));
+    else localStorage.removeItem(PARTITA_KEY);
+  } catch { /* ignore */ }
+}
+function clearPartita() {
+  try { localStorage.removeItem(PARTITA_KEY); } catch { /* ignore */ }
+}
+
+// ── Backup giornaliero automatico ─────────────────────────────────────────────
+function loadBackups() {
+  try { return JSON.parse(localStorage.getItem("briscola_backups") || "[]"); } catch { return []; }
+}
+function eseguiBackupGiornaliero() {
+  try {
+    const oggi = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    if (localStorage.getItem("briscola_last_backup") === oggi) return;
+    const snapshot = {
+      data: oggi,
+      ts: Date.now(),
+      sessioni: loadSessioni(),
+      rubrica: loadRubrica(),
+    };
+    let backups = loadBackups().filter(b => b.data !== oggi);
+    backups.unshift(snapshot);
+    backups = backups.slice(0, 7); // mantiene gli ultimi 7 giorni
+    localStorage.setItem("briscola_backups", JSON.stringify(backups));
+    localStorage.setItem("briscola_last_backup", oggi);
+  } catch { /* ignore */ }
+}
+
+// ── Export / Import completo dei dati ─────────────────────────────────────────
+function buildDump() {
+  return {
+    app: "briscola-segnapunti",
+    versione: 1,
+    esportatoIl: new Date().toISOString(),
+    sessioni: loadSessioni(),
+    rubrica: loadRubrica(),
+  };
+}
+function esportaFile() {
+  try {
+    const blob = new Blob([JSON.stringify(buildDump(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `briscola-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    return true;
+  } catch { return false; }
+}
+function importaDati(json) {
+  if (!json || typeof json !== "object") return false;
+  if (Array.isArray(json.sessioni)) localStorage.setItem("briscola_sessioni", JSON.stringify(json.sessioni.slice(0, 30)));
+  if (Array.isArray(json.rubrica)) saveRubrica(json.rubrica);
+  return Array.isArray(json.sessioni) || Array.isArray(json.rubrica);
 }
 
 function Rubrica({ onClose }) {
@@ -742,7 +834,293 @@ function Rubrica({ onClose }) {
   );
 }
 
-function HomeClassifica({ sessioniAll, cumulative, rankEmoji }) {
+// ── Modal modifica / annulla mano ─────────────────────────────────────────────
+function EditRoundModal({ players, round, onSave, onDelete, onCancel }) {
+  const [chiamanteId, setChiamanteId] = useState(round.chiamanteId);
+  const [cifraStr, setCifraStr] = useState(String(round.cifra));
+  const [vince, setVince] = useState(round.vince);
+  const [compagnoId, setCompagnoId] = useState(round.compagnoId);
+  const [cappotto, setCappotto] = useState(round.cappotto);
+
+  const cifra = parseInt(cifraStr);
+  const cifraValid = !isNaN(cifra) && cifra >= 81 && cifra <= 118;
+  const compagnoPlayers = cifra === 118 ? players : players.filter(p => p.id !== chiamanteId);
+  const puntiBase = cifraValid ? calcolaPuntiBase(cifra) : { chiamante: 0, compagno: 0, avversario: 0 };
+  const canConfirm = cifraValid && chiamanteId != null && vince !== null && compagnoId != null;
+
+  const handleConfirm = () => {
+    if (!canConfirm) return;
+    const delta = calcolaDelta(players, chiamanteId, compagnoId, vince, cappotto, cifra);
+    onSave({ id: round.id, chiamanteId, cifra, vince, compagnoId, cappotto, delta });
+  };
+
+  const lbl = { fontSize: 10, fontWeight: 700, letterSpacing: 3, color: "#888",
+    textTransform: "uppercase", display: "block", marginBottom: 10 };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 320, background: "rgba(0,0,0,0.65)",
+      backdropFilter: "blur(4px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div style={{ background: `linear-gradient(160deg,${PALETTE.carta},${PALETTE.cartaScura})`,
+        borderRadius: "18px 18px 0 0", padding: "22px 20px 32px", width: "100%", maxWidth: 520,
+        boxShadow: "0 -8px 40px rgba(0,0,0,0.45)", border: `2px solid ${PALETTE.oroLight}44`,
+        maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box" }}>
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: "#ccc", margin: "0 auto 18px" }} />
+        <div style={{ marginBottom: 18, borderBottom: `1px solid ${PALETTE.oroLight}55`, paddingBottom: 12,
+          display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: 3, color: "#999", textTransform: "uppercase" }}>Modifica mano {round.round}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: PALETTE.inchiostro, fontFamily: "Georgia, serif" }}>
+              Correggi un errore
+            </div>
+          </div>
+          <button onClick={onCancel} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#aaa" }}>✕</button>
+        </div>
+
+        {/* Chiamante */}
+        <div style={{ marginBottom: 16 }}>
+          <span style={lbl}>Chiamante</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {players.map((p, i) => {
+              const sel = chiamanteId === p.id;
+              return (
+                <button key={p.id} onClick={() => { setChiamanteId(p.id); if (cifra !== 118 && compagnoId === p.id) setCompagnoId(null); }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 13px", borderRadius: 9, cursor: "pointer",
+                    border: `2px solid ${sel ? PALETTE.oro : "#ccc"}`,
+                    background: sel ? `linear-gradient(135deg,${PALETTE.feltro},${PALETTE.feltroLight})` : "rgba(255,255,255,0.4)",
+                    color: sel ? PALETTE.carta : PALETTE.inchiostro, fontFamily: "Georgia, serif", fontSize: 15, fontWeight: sel ? 700 : 500 }}>
+                  <span style={{ fontSize: 17, color: sel ? PALETTE.oroLight : SEMI_COLORS[i % 4] }}>{SEMI[i % 4]}</span>
+                  <span style={{ flex: 1, textAlign: "left" }}>{p.name}</span>
+                  {sel && <span>✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Cifra */}
+        <div style={{ marginBottom: 16 }}>
+          <span style={lbl}>Cifra (81–118)</span>
+          <input type="number" min={81} max={118} value={cifraStr} onChange={e => setCifraStr(e.target.value)}
+            style={{ width: "100%", padding: "11px", fontSize: 26, borderRadius: 10,
+              border: `2px solid ${cifraValid ? PALETTE.oro : "#ccc"}`, background: "rgba(255,255,255,0.7)",
+              color: PALETTE.inchiostro, fontFamily: "monospace", fontWeight: 900, outline: "none",
+              boxSizing: "border-box", textAlign: "center" }} />
+          {cifraValid && (
+            <div style={{ textAlign: "center", marginTop: 6, fontSize: 11, color: "#888" }}>
+              chiam. +{puntiBase.chiamante} · comp. +{puntiBase.compagno} · avv. −{puntiBase.avversario}
+            </div>
+          )}
+        </div>
+
+        {/* Esito */}
+        <div style={{ marginBottom: 16 }}>
+          <span style={lbl}>Esito</span>
+          <div style={{ display: "flex", gap: 10 }}>
+            {[{ val: true, label: "✓ Vince", bg: PALETTE.feltro }, { val: false, label: "✕ Perde", bg: PALETTE.rosso }].map(opt => (
+              <button key={String(opt.val)} onClick={() => setVince(opt.val)}
+                style={{ flex: 1, padding: "12px 0", borderRadius: 10,
+                  border: `2px solid ${vince === opt.val ? PALETTE.oro : "#ccc"}`,
+                  background: vince === opt.val ? opt.bg : "rgba(255,255,255,0.4)",
+                  color: vince === opt.val ? PALETTE.carta : PALETTE.inchiostro,
+                  fontFamily: "Georgia, serif", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Compagno */}
+        <div style={{ marginBottom: 16 }}>
+          <span style={lbl}>Compagno{cifra === 118 ? " (anche sé stesso)" : ""}</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {compagnoPlayers.map((p) => {
+              const idx = players.indexOf(p);
+              const sel = compagnoId === p.id;
+              const isSelf = p.id === chiamanteId;
+              return (
+                <button key={p.id} onClick={() => setCompagnoId(p.id)}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 13px", borderRadius: 9, cursor: "pointer",
+                    border: `2px solid ${sel ? PALETTE.oro : isSelf ? PALETTE.oro + "66" : "#ccc"}`,
+                    background: sel ? `linear-gradient(135deg,${PALETTE.feltro},${PALETTE.feltroLight})` : "rgba(255,255,255,0.4)",
+                    color: sel ? PALETTE.carta : PALETTE.inchiostro, fontFamily: "Georgia, serif", fontSize: 15, fontWeight: sel ? 700 : 500 }}>
+                  <span style={{ fontSize: 16, color: sel ? PALETTE.oroLight : SEMI_COLORS[idx % 4] }}>{SEMI[idx % 4]}</span>
+                  <span style={{ flex: 1, textAlign: "left" }}>{p.name}{isSelf ? " (solo)" : ""}</span>
+                  {sel && <span>✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Cappotto */}
+        <div style={{ marginBottom: 18 }}>
+          <span style={lbl}>Cappotto? (punti ×2)</span>
+          <div style={{ display: "flex", gap: 10 }}>
+            {[{ val: false, label: "No" }, { val: true, label: "🃏 Sì" }].map(opt => (
+              <button key={String(opt.val)} onClick={() => setCappotto(opt.val)}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 9,
+                  border: `2px solid ${cappotto === opt.val ? PALETTE.oro : "#ccc"}`,
+                  background: cappotto === opt.val ? `linear-gradient(135deg,${PALETTE.oro},${PALETTE.oroLight})` : "rgba(255,255,255,0.35)",
+                  fontFamily: "Georgia, serif", fontSize: 15, fontWeight: cappotto === opt.val ? 800 : 500,
+                  cursor: "pointer", color: PALETTE.inchiostro }}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 9, marginBottom: 10 }}>
+          <button onClick={handleConfirm} disabled={!canConfirm}
+            style={{ flex: 1, padding: "13px 0", borderRadius: 10, border: "none",
+              background: canConfirm ? `linear-gradient(135deg,${PALETTE.oro},${PALETTE.oroLight})` : "#ccc",
+              color: canConfirm ? PALETTE.inchiostro : "#999", fontFamily: "Georgia, serif",
+              fontSize: 15, fontWeight: 800, cursor: canConfirm ? "pointer" : "not-allowed",
+              letterSpacing: 1, textTransform: "uppercase" }}>
+            Salva modifica
+          </button>
+        </div>
+        <button onClick={() => { if (window.confirm(`Annullare ed eliminare la mano ${round.round}?`)) onDelete(round.id); }}
+          style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: `2px solid ${PALETTE.rosso}`,
+            background: "transparent", color: PALETTE.rosso, fontFamily: "Georgia, serif",
+            fontSize: 14, fontWeight: 800, cursor: "pointer", letterSpacing: 1, textTransform: "uppercase" }}>
+          🗑 Annulla questa mano
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal backup / esporta / importa / ripristina ─────────────────────────────
+function BackupModal({ onClose, onChange }) {
+  const [backups] = useState(() => loadBackups());
+  const [msg, setMsg] = useState("");
+  const [showJson, setShowJson] = useState(false);
+  const fileRef = useRef(null);
+
+  const jsonText = JSON.stringify(buildDump(), null, 2);
+
+  const ripristina = (snap) => {
+    if (!window.confirm(`Ripristinare il backup del ${snap.data}?\nI dati attuali (sessioni e rubrica) verranno sostituiti.`)) return;
+    if (Array.isArray(snap.sessioni)) localStorage.setItem("briscola_sessioni", JSON.stringify(snap.sessioni.slice(0, 30)));
+    if (Array.isArray(snap.rubrica)) saveRubrica(snap.rubrica);
+    setMsg("✓ Backup ripristinato");
+    onChange && onChange();
+  };
+
+  const copia = async () => {
+    try { await navigator.clipboard.writeText(jsonText); setMsg("✓ Copiato negli appunti"); }
+    catch { setShowJson(true); setMsg("Seleziona e copia il testo qui sotto"); }
+  };
+
+  const onFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const json = JSON.parse(reader.result);
+        if (importaDati(json)) { setMsg("✓ Dati importati con successo"); onChange && onChange(); }
+        else setMsg("✕ File non valido");
+      } catch { setMsg("✕ File non leggibile"); }
+    };
+    reader.readAsText(file);
+  };
+
+  const lbl = { fontSize: 10, fontWeight: 700, letterSpacing: 3, color: "#888", textTransform: "uppercase", display: "block", marginBottom: 8 };
+  const sec = { borderTop: `1px solid ${PALETTE.oroLight}44`, paddingTop: 16, marginTop: 16 };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.7)",
+      backdropFilter: "blur(4px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div style={{ background: `linear-gradient(160deg,${PALETTE.carta},${PALETTE.cartaScura})`,
+        borderRadius: "18px 18px 0 0", padding: "20px 18px 36px", width: "100%", maxWidth: 520,
+        boxShadow: "0 -8px 40px rgba(0,0,0,0.45)", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: "#ccc", margin: "0 auto 16px" }} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <h2 style={{ margin: 0, fontSize: 22, fontFamily: "Georgia, serif", fontWeight: 900, color: PALETTE.inchiostro }}>💾 Backup &amp; Dati</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#aaa" }}>✕</button>
+        </div>
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
+          I dati sono salvati sul telefono. Il backup automatico viene creato ogni giorno.
+        </div>
+
+        {msg && (
+          <div style={{ background: `${PALETTE.feltro}18`, border: `1px solid ${PALETTE.feltro}44`,
+            borderRadius: 8, padding: "8px 12px", fontSize: 13, color: PALETTE.feltro, marginBottom: 12, fontWeight: 700 }}>
+            {msg}
+          </div>
+        )}
+
+        {/* Esporta */}
+        <div>
+          <span style={lbl}>Esporta (salva una copia)</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { if (esportaFile()) setMsg("✓ File scaricato"); else { setShowJson(true); setMsg("Download non disponibile: copia il testo"); } }}
+              style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "none",
+                background: `linear-gradient(135deg,${PALETTE.oro},${PALETTE.oroLight})`, color: PALETTE.inchiostro,
+                fontFamily: "Georgia, serif", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
+              ⬇ Scarica file
+            </button>
+            <button onClick={copia}
+              style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: `2px solid ${PALETTE.oro}`,
+                background: "transparent", color: PALETTE.feltro,
+                fontFamily: "Georgia, serif", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
+              📋 Copia
+            </button>
+          </div>
+          {showJson && (
+            <textarea readOnly value={jsonText} onClick={e => e.target.select()}
+              style={{ width: "100%", height: 120, marginTop: 10, fontSize: 11, fontFamily: "monospace",
+                borderRadius: 8, border: `1px solid ${PALETTE.oro}66`, padding: 8, boxSizing: "border-box",
+                background: "rgba(255,255,255,0.7)" }} />
+          )}
+        </div>
+
+        {/* Importa */}
+        <div style={sec}>
+          <span style={lbl}>Importa (ripristina da file)</span>
+          <input ref={fileRef} type="file" accept="application/json,.json" onChange={onFile} style={{ display: "none" }} />
+          <button onClick={() => fileRef.current?.click()}
+            style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: `2px dashed ${PALETTE.oro}88`,
+              background: "transparent", color: "#666", fontFamily: "Georgia, serif", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+            📂 Scegli un file di backup
+          </button>
+        </div>
+
+        {/* Backup automatici */}
+        <div style={sec}>
+          <span style={lbl}>Backup automatici ({backups.length})</span>
+          {backups.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#bbb", textAlign: "center", padding: "12px 0" }}>
+              Nessun backup automatico ancora.
+            </div>
+          ) : (
+            backups.map((b) => (
+              <div key={b.ts} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+                background: "rgba(255,255,255,0.45)", borderRadius: 10, marginBottom: 7, border: `1px solid ${PALETTE.oroLight}44` }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, fontFamily: "Georgia, serif", color: PALETTE.inchiostro }}>
+                    {b.data.split("-").reverse().join("/")}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#888" }}>
+                    {(b.sessioni?.length ?? 0)} sessioni · {(b.rubrica?.length ?? 0)} giocatori
+                  </div>
+                </div>
+                <button onClick={() => ripristina(b)}
+                  style={{ background: PALETTE.feltro, color: "#fff", border: "none", borderRadius: 7,
+                    padding: "6px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12, fontFamily: "Georgia, serif" }}>
+                  ↺ Ripristina
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomeClassifica({ sessioniAll, cumulative, rankEmoji, onDeleteSessione }) {
   const [tab, setTab] = useState("generale");
   const compagniCum = calcolaCompagniCumulativi(sessioniAll);
   const chiamantiCum = calcolaChiamantiCumulativi(sessioniAll);
@@ -958,9 +1336,14 @@ function HomeClassifica({ sessioniAll, cumulative, rankEmoji }) {
             <div key={s.id} style={{ padding: "12px 0", borderBottom: si < sessioniAll.length - 1 ? "1px solid rgba(0,0,0,0.07)" : "none" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: "#555", fontFamily: "Georgia, serif" }}>{s.data}</span>
-                <div style={{ display: "flex", gap: 5 }}>
+                <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
                   <span style={{ fontSize: 10, color: "#aaa", background: "rgba(0,0,0,0.06)", borderRadius: 5, padding: "2px 6px" }}>{s.mani} mani</span>
                   <span style={{ fontSize: 10, color: "#aaa", background: "rgba(0,0,0,0.06)", borderRadius: 5, padding: "2px 6px" }}>#{sessioniAll.length - si}</span>
+                  {onDeleteSessione && (
+                    <button onClick={() => { if (window.confirm(`Eliminare la sessione del ${s.data}?\nVerrà rimossa dalla classifica totale.`)) onDeleteSessione(s.id); }}
+                      style={{ background: "none", border: "none", color: "#daa", cursor: "pointer", fontSize: 15, padding: "0 2px", lineHeight: 1 }}
+                      title="Elimina sessione">🗑</button>
+                  )}
                 </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -989,22 +1372,68 @@ function HomeClassifica({ sessioniAll, cumulative, rankEmoji }) {
 }
 
 export default function BriscolaApp() {
-  const [state, setState] = useState(initialState);
+  const [state, setState] = useState(() => loadPartita() || initialState);
   const [showRoundModal, setShowRoundModal] = useState(false);
   const [chiamataPlayer, setChiamataPlayer] = useState(null);
   const [chiamataCifra, setChiamataCifra] = useState("");
   const [activeTab, setActiveTab] = useState("partita");
-  const [savedNames, setSavedNames] = useState(() => loadSavedNames());
+  const [, setSavedNames] = useState(() => loadSavedNames());
   const [fineSessione, setFineSessione] = useState(false);
   const [showConfirmFine, setShowConfirmFine] = useState(false);
   const [showRubrica, setShowRubrica] = useState(false);
+  const [showBackup, setShowBackup] = useState(false);
+  const [editingRound, setEditingRound] = useState(null);
+  const [, setDataVersion] = useState(0);
   const [setupTab, setSetupTab] = useState("gioca");
+
+  // Backup automatico giornaliero al primo avvio
+  useEffect(() => { eseguiBackupGiornaliero(); }, []);
+
+  // Auto-salvataggio partita in corso (ricorda i dati alla chiusura)
+  useEffect(() => {
+    if (fineSessione) { clearPartita(); return; }
+    savePartita(state);
+  }, [state, fineSessione]);
+
+  const refreshData = () => setDataVersion(v => v + 1);
 
   const rubrica = loadRubrica();
   const { players, rounds, gameMode, gameStarted, chiamataConfirmed, chiamata } = state;
   const stats = calcolaStats(players, rounds);
   const sortedPlayers = [...players].sort((a, b) => (stats[b.id]?.puntiTotali ?? 0) - (stats[a.id]?.puntiTotali ?? 0));
   const rankEmoji = ["👑", "🥈", "🥉"];
+
+  // ── Modifica / annullamento mani ──
+  const recomputeScores = (rounds, players) => players.map(p => ({
+    ...p, score: rounds.reduce((acc, r) => acc + (r.delta?.[p.id] || 0), 0),
+  }));
+
+  const eliminaMano = (roundId) => {
+    setState(s => {
+      const newRounds = s.rounds.filter(r => r.id !== roundId).map((r, i) => ({ ...r, round: i + 1 }));
+      return { ...s, rounds: newRounds, players: recomputeScores(newRounds, s.players) };
+    });
+    setEditingRound(null);
+  };
+
+  const aggiornaMano = (upd) => {
+    setState(s => {
+      const newRounds = s.rounds.map(r => r.id === upd.id ? { ...r, ...upd } : r);
+      return { ...s, rounds: newRounds, players: recomputeScores(newRounds, s.players) };
+    });
+    setEditingRound(null);
+  };
+
+  const annullaUltimaMano = () => {
+    setState(s => {
+      if (s.rounds.length === 0) return s;
+      const newRounds = s.rounds.slice(0, -1);
+      return { ...s, rounds: newRounds, players: recomputeScores(newRounds, s.players) };
+    });
+  };
+
+  // ── Modifica classifica (elimina sessione) ──
+  const eliminaSessione = (id) => { deleteSessione(id); refreshData(); };
 
   const startGame = () => {
     if (players.length < parseInt(gameMode)) return;
@@ -1179,6 +1608,14 @@ export default function BriscolaApp() {
         padding: "32px 16px 48px", position: "relative", fontFamily: "Georgia, serif" }}>
         <SeedDecoration />
         {showRubrica && <Rubrica onClose={() => { setShowRubrica(false); setSavedNames(loadSavedNames()); }} />}
+        {showBackup && <BackupModal onClose={() => setShowBackup(false)} onChange={refreshData} />}
+        <button onClick={() => setShowBackup(true)} title="Backup e dati"
+          style={{ position: "absolute", top: 16, right: 16, zIndex: 2,
+            background: "rgba(0,0,0,0.22)", border: `1px solid ${PALETTE.oroLight}55`, borderRadius: 20,
+            padding: "7px 14px", fontSize: 13, color: PALETTE.carta, cursor: "pointer",
+            fontFamily: "Georgia, serif", fontWeight: 700 }}>
+          💾 Backup
+        </button>
         <div style={{ textAlign: "center", marginBottom: 24, position: "relative", zIndex: 1 }}>
           <div style={{ fontSize: 11, letterSpacing: 6, color: PALETTE.oroLight, textTransform: "uppercase", marginBottom: 6 }}>Segnapunti</div>
           <h1 style={{ fontSize: 50, margin: 0, color: PALETTE.carta, letterSpacing: 2,
@@ -1322,7 +1759,7 @@ export default function BriscolaApp() {
                 </div>
               </div>
             ) : (
-              <HomeClassifica sessioniAll={sessioniAll} cumulative={cumulative} rankEmoji={rankEmoji} />
+              <HomeClassifica sessioniAll={sessioniAll} cumulative={cumulative} rankEmoji={rankEmoji} onDeleteSessione={eliminaSessione} />
             )}
           </div>
         )}
@@ -1403,6 +1840,12 @@ export default function BriscolaApp() {
                 })}
               </div>
             </div>
+            <button onClick={() => { if (window.confirm(`Annullare la mano ${lastRound.round}? I punti verranno ripristinati.`)) annullaUltimaMano(); }}
+              style={{ width: "100%", marginTop: 8, padding: "9px 0", borderRadius: 9,
+                border: `1px solid rgba(255,255,255,0.3)`, background: "rgba(255,255,255,0.12)",
+                color: PALETTE.carta, fontFamily: "Georgia, serif", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+              ↩ Annulla ultima mano (errore)
+            </button>
           </div>
         )}
         <div style={{ textAlign: "center", marginBottom: 20, position: "relative", zIndex: 1 }}>
@@ -1493,6 +1936,11 @@ export default function BriscolaApp() {
       padding: "16px 14px 48px", fontFamily: "Georgia, serif", position: "relative" }}>
       <SeedDecoration opacity={0.07} />
       {showRubrica && <Rubrica onClose={() => { setShowRubrica(false); setSavedNames(loadSavedNames()); }} />}
+      {showBackup && <BackupModal onClose={() => setShowBackup(false)} onChange={refreshData} />}
+      {editingRound && (
+        <EditRoundModal players={players} round={editingRound}
+          onSave={aggiornaMano} onDelete={eliminaMano} onCancel={() => setEditingRound(null)} />
+      )}
       {showRoundModal && (
         <RoundModal players={players} chiamata={chiamata}
           roundNumber={rounds.length + 1}
@@ -1534,6 +1982,7 @@ export default function BriscolaApp() {
           )}
           <button onClick={resetGame} style={btn("rgba(255,255,255,0.15)", PALETTE.carta)}>↺ Reset</button>
           <button onClick={() => setShowRubrica(true)} style={btn("rgba(255,255,255,0.15)", PALETTE.carta)}>📒</button>
+          <button onClick={() => setShowBackup(true)} style={btn("rgba(255,255,255,0.15)", PALETTE.carta)}>💾</button>
           <button onClick={() => setShowConfirmFine(true)} style={btn("#B7410E", "#fff", { fontWeight: 800 })}>🏁 Fine</button>
           <button onClick={newGame} style={btn(PALETTE.rosso, "#fff")}>✕ Esci</button>
         </div>
@@ -1582,7 +2031,7 @@ export default function BriscolaApp() {
           </div>
         )}
         {activeTab === "classifica" && (
-          <ClassificaTab players={players} rounds={rounds} stats={stats} sessioni={loadSessioni()} />
+          <ClassificaTab players={players} rounds={rounds} stats={stats} sessioni={loadSessioni()} onEditRound={setEditingRound} />
         )}
       </div>
     </div>
