@@ -33,7 +33,8 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.20.0"
+    "@babel/core": "^7.20.0",
+    "three": "0.128.0"
   },
   "private": true
 }

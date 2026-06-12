@@ -81,19 +81,19 @@
       <div class="loading-sub">Three.js r128</div>
     </div>
     <div id="offline-screen">
-      <div class="offline-icon">📡</div>
-      <div class="offline-title">Connessione assente</div>
-      <div class="offline-msg">Il viewer 3D richiede internet per la prima apertura. Connettiti e riprova.</div>
+      <div class="offline-icon">⚠️</div>
+      <div class="offline-title">Errore viewer 3D</div>
+      <div class="offline-msg">Impossibile inizializzare il motore grafico. Riavvia l'app e riprova.</div>
     </div>
     <div id="status-overlay">Caricamento...</div>
     <div id="mode-indicator">VISUALIZZA</div>
   </div>
 
   <script>
-    // Detect CDN load failures before Three.js loads
+    // Detect script load failures (CDN tags not yet inlined during dev)
     window.__threeLoadError = false;
     window.addEventListener('error', function(e) {
-      if (e.target && e.target.tagName === 'SCRIPT' && e.target.src && e.target.src.includes('three')) {
+      if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
         window.__threeLoadError = true;
         document.getElementById('loading-screen').style.display = 'none';
         document.getElementById('offline-screen').style.display = 'flex';

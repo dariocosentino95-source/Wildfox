@@ -28,6 +28,7 @@
         "backgroundColor": "#0A0A0F"
       },
       "package": "com.wildfox.app3d",
+      "usesCleartextTraffic": true,
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",
