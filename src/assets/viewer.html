@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Wildfox 3D Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0A0A0F; }
+    #canvas-container { width: 100%; height: 100%; position: relative; }
+    canvas { display: block; width: 100% !important; height: 100% !important; touch-action: none; }
+
+    #loading-screen {
+      position: absolute; inset: 0;
+      background: #0A0A0F;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px; z-index: 100;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      transition: opacity 0.4s;
+    }
+    #loading-screen.hidden { opacity: 0; pointer-events: none; }
+    .spinner {
+      width: 44px; height: 44px;
+      border: 3px solid #2A2A3E;
+      border-top-color: #8B5CF6;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { color: #A78BFA; font-size: 13px; font-weight: 500; }
+    .loading-sub  { color: #6B6B8A; font-size: 11px; }
+
+    #offline-screen {
+      position: absolute; inset: 0;
+      background: #0A0A0F;
+      display: none; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px; z-index: 99; padding: 32px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      text-align: center;
+    }
+    .offline-icon { font-size: 48px; }
+    .offline-title { color: #EF4444; font-size: 16px; font-weight: 700; }
+    .offline-msg   { color: #6B6B8A; font-size: 12px; line-height: 1.6; }
+
+    #status-overlay {
+      position: absolute; top: 12px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(10,10,15,0.82);
+      color: #A78BFA;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 12px; padding: 5px 14px;
+      border-radius: 14px; border: 1px solid #3D3D55;
+      pointer-events: none; white-space: nowrap;
+      opacity: 0; transition: opacity 0.25s;
+      backdrop-filter: blur(4px);
+    }
+    #status-overlay.visible { opacity: 1; }
+
+    #mode-indicator {
+      position: absolute; bottom: 16px; right: 16px;
+      background: rgba(10,10,15,0.85);
+      color: #8B5CF6;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 11px; font-weight: 700;
+      padding: 6px 12px; border-radius: 8px;
+      border: 1px solid #3D3D55;
+      pointer-events: none; text-transform: uppercase;
+      letter-spacing: 0.08em;
+      backdrop-filter: blur(4px);
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container">
+    <canvas id="three-canvas"></canvas>
+    <div id="loading-screen">
+      <div class="spinner"></div>
+      <div class="loading-text">Caricamento viewer 3D...</div>
+      <div class="loading-sub">Three.js r128</div>
+    </div>
+    <div id="offline-screen">
+      <div class="offline-icon">⚠️</div>
+      <div class="offline-title">Errore viewer 3D</div>
+      <div class="offline-msg">Impossibile inizializzare il motore grafico. Riavvia l'app e riprova.</div>
+    </div>
+    <div id="status-overlay">Caricamento...</div>
+    <div id="mode-indicator">VISUALIZZA</div>
+  </div>
+
+  <script>
+    // Detect script load failures (CDN tags not yet inlined during dev)
+    window.__threeLoadError = false;
+    window.addEventListener('error', function(e) {
+      if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
+        window.__threeLoadError = true;
+        document.getElementById('loading-screen').style.display = 'none';
+        document.getElementById('offline-screen').style.display = 'flex';
+      }
+    }, true);
+  </script>
+
+  <!-- Three.js core (non-module, r128 — last version with examples/js in npm) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <!-- OrbitControls -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- Loaders -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // ── State ──────────────────────────────────────────────────────────────
+      var state = {
+        mode: 'view',         // 'view' | 'select' | 'annotate'
+        model: null,          // current THREE.Object3D or Group
+        annotations: [],      // [{id, point, text, marker}]
+        selectedFace: null,
+        highlightMesh: null,
+        originalMaterials: new Map(),
+        annotationIdCounter: 0,
+      };
+
+      // ── Renderer setup ────────────────────────────────────────────────────
+      var canvas = document.getElementById('three-canvas');
+      var container = document.getElementById('canvas-container');
+      var statusEl = document.getElementById('status-overlay');
+      var modeIndicatorEl = document.getElementById('mode-indicator');
+
+      var loadingScreen = document.getElementById('loading-screen');
+
+      var renderer = new THREE.WebGLRenderer({
+        canvas: canvas,
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance',
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.1;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.setClearColor(0x0A0A0F, 1);
+
+      var scene = new THREE.Scene();
+      scene.fog = new THREE.Fog(0x0A0A0F, 20, 60);
+
+      var camera = new THREE.PerspectiveCamera(
+        50,
+        container.clientWidth / container.clientHeight,
+        0.01,
+        200
+      );
+      camera.position.set(2.5, 2, 3.5);
+
+      // ── Controls ──────────────────────────────────────────────────────────
+      var controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.rotateSpeed = 0.8;
+      controls.panSpeed = 0.6;
+      controls.zoomSpeed = 1.2;
+      controls.minDistance = 0.3;
+      controls.maxDistance = 50;
+      controls.maxPolarAngle = Math.PI * 0.95;
+      controls.target.set(0, 0, 0);
+      controls.update();
+
+      // ── Lighting ──────────────────────────────────────────────────────────
+      var ambientLight = new THREE.AmbientLight(0x8B6FB5, 0.5);
+      scene.add(ambientLight);
+
+      var dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
+      dirLight.position.set(5, 10, 7);
+      dirLight.castShadow = true;
+      dirLight.shadow.mapSize.width = 1024;
+      dirLight.shadow.mapSize.height = 1024;
+      dirLight.shadow.camera.near = 0.5;
+      dirLight.shadow.camera.far = 50;
+      dirLight.shadow.camera.left = -10;
+      dirLight.shadow.camera.right = 10;
+      dirLight.shadow.camera.top = 10;
+      dirLight.shadow.camera.bottom = -10;
+      scene.add(dirLight);
+
+      var fillLight = new THREE.DirectionalLight(0x4466FF, 0.6);
+      fillLight.position.set(-5, 3, -5);
+      scene.add(fillLight);
+
+      var rimLight = new THREE.DirectionalLight(0x8B5CF6, 0.4);
+      rimLight.position.set(0, -3, -8);
+      scene.add(rimLight);
+
+      // ── Grid ──────────────────────────────────────────────────────────────
+      var gridHelper = new THREE.GridHelper(20, 40, 0x2A2A3E, 0x1A1A28);
+      gridHelper.position.y = -0.001;
+      scene.add(gridHelper);
+
+      // ── Placeholder spinning cube ─────────────────────────────────────────
+      var placeholderGroup = new THREE.Group();
+      var cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+      var cubeMat = new THREE.MeshStandardMaterial({
+        color: 0x8B5CF6,
+        metalness: 0.3,
+        roughness: 0.4,
+        emissive: 0x2A1A55,
+        emissiveIntensity: 0.5,
+      });
+      var cube = new THREE.Mesh(cubeGeo, cubeMat);
+      cube.castShadow = true;
+      placeholderGroup.add(cube);
+
+      // Wireframe overlay
+      var wireGeo = new THREE.EdgesGeometry(cubeGeo);
+      var wireMat = new THREE.LineBasicMaterial({ color: 0xA78BFA, linewidth: 1 });
+      var wireframe = new THREE.LineSegments(wireGeo, wireMat);
+      placeholderGroup.add(wireframe);
+
+      scene.add(placeholderGroup);
+
+      // ── Raycaster ─────────────────────────────────────────────────────────
+      var raycaster = new THREE.Raycaster();
+      var pointer = new THREE.Vector2();
+
+      // ── Helpers ───────────────────────────────────────────────────────────
+      function showStatus(msg, duration) {
+        statusEl.textContent = msg;
+        statusEl.classList.add('visible');
+        if (duration !== undefined) {
+          setTimeout(function () { statusEl.classList.remove('visible'); }, duration);
+        }
+      }
+
+      function hideStatus() {
+        statusEl.classList.remove('visible');
+      }
+
+      function updateModeIndicator() {
+        var labels = { view: 'VISUALIZZA', select: 'SELEZIONA', annotate: 'ANNOTA' };
+        var colors = { view: '#8B5CF6', select: '#F59E0B', annotate: '#EF4444' };
+        modeIndicatorEl.textContent = labels[state.mode] || state.mode.toUpperCase();
+        modeIndicatorEl.style.color = colors[state.mode] || '#8B5CF6';
+        modeIndicatorEl.style.borderColor = colors[state.mode] || '#3D3D55';
+      }
+
+      function postToRN(data) {
+        try {
+          if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(data));
+          }
+        } catch (e) {
+          // Silently ignore if not in RN context
+        }
+      }
+
+      // ── Model loading ─────────────────────────────────────────────────────
+      function clearScene() {
+        if (state.model) {
+          scene.remove(state.model);
+          state.model = null;
+        }
+        // Remove annotation markers
+        state.annotations.forEach(function (ann) {
+          if (ann.marker) scene.remove(ann.marker);
+        });
+        state.annotations = [];
+        state.highlightMesh = null;
+        state.originalMaterials.clear();
+        state.selectedFace = null;
+      }
+
+      function fitCameraToObject(object) {
+        var box = new THREE.Box3().setFromObject(object);
+        var center = box.getCenter(new THREE.Vector3());
+        var size = box.getSize(new THREE.Vector3());
+        var maxDim = Math.max(size.x, size.y, size.z);
+        var fov = camera.fov * (Math.PI / 180);
+        var dist = Math.abs(maxDim / (2 * Math.tan(fov / 2))) * 1.8;
+
+        camera.position.set(center.x + dist * 0.6, center.y + dist * 0.4, center.z + dist * 0.8);
+        controls.target.copy(center);
+        controls.update();
+
+        // Move grid to bottom of object
+        gridHelper.position.y = box.min.y - 0.001;
+      }
+
+      function loadGLTF(uri) {
+        showStatus('Caricamento modello GLTF...');
+        var loader = new THREE.GLTFLoader();
+        loader.load(
+          uri,
+          function (gltf) {
+            clearScene();
+            state.model = gltf.scene;
+            state.model.traverse(function (child) {
+              if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+              }
+            });
+            scene.add(state.model);
+            placeholderGroup.visible = false;
+            fitCameraToObject(state.model);
+            showStatus('Modello caricato', 2000);
+            postToRN({ type: 'modelLoaded', format: 'gltf' });
+          },
+          function (xhr) {
+            if (xhr.total > 0) {
+              var pct = Math.round((xhr.loaded / xhr.total) * 100);
+              showStatus('Caricamento ' + pct + '%');
+            }
+          },
+          function (err) {
+            showStatus('Errore caricamento: ' + (err.message || 'Sconosciuto'), 4000);
+            postToRN({ type: 'modelError', error: err.message || 'Load error' });
+          }
+        );
+      }
+
+      function loadOBJ(uri) {
+        showStatus('Caricamento modello OBJ...');
+        var loader = new THREE.OBJLoader();
+        loader.load(
+          uri,
+          function (object) {
+            clearScene();
+            object.traverse(function (child) {
+              if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+                if (!child.material || child.material.type === 'MeshBasicMaterial') {
+                  child.material = new THREE.MeshStandardMaterial({
+                    color: 0x8B5CF6,
+                    metalness: 0.2,
+                    roughness: 0.6,
+                  });
+                }
+              }
+            });
+            state.model = object;
+            scene.add(state.model);
+            placeholderGroup.visible = false;
+            fitCameraToObject(state.model);
+            showStatus('Modello OBJ caricato', 2000);
+            postToRN({ type: 'modelLoaded', format: 'obj' });
+          },
+          undefined,
+          function (err) {
+            showStatus('Errore OBJ: ' + (err.message || ''), 4000);
+            postToRN({ type: 'modelError', error: err.message || 'OBJ load error' });
+          }
+        );
+      }
+
+      function loadSTL(uri) {
+        showStatus('Caricamento modello STL...');
+        var loader = new THREE.STLLoader();
+        loader.load(
+          uri,
+          function (geometry) {
+            clearScene();
+            geometry.computeVertexNormals();
+            var mat = new THREE.MeshStandardMaterial({
+              color: 0x8B5CF6,
+              metalness: 0.2,
+              roughness: 0.6,
+              side: THREE.DoubleSide,
+            });
+            var mesh = new THREE.Mesh(geometry, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            state.model = new THREE.Group();
+            state.model.add(mesh);
+            scene.add(state.model);
+            placeholderGroup.visible = false;
+            fitCameraToObject(state.model);
+            showStatus('Modello STL caricato', 2000);
+            postToRN({ type: 'modelLoaded', format: 'stl' });
+          },
+          undefined,
+          function (err) {
+            showStatus('Errore STL: ' + (err.message || ''), 4000);
+            postToRN({ type: 'modelError', error: err.message || 'STL load error' });
+          }
+        );
+      }
+
+      function loadModel(uri, format) {
+        if (!uri) {
+          showStatus('Nessun modello da caricare', 2000);
+          return;
+        }
+        var fmt = (format || 'gltf').toLowerCase();
+        if (fmt === 'gltf' || fmt === 'glb') {
+          loadGLTF(uri);
+        } else if (fmt === 'obj') {
+          loadOBJ(uri);
+        } else if (fmt === 'stl') {
+          loadSTL(uri);
+        } else {
+          // Try GLTF as fallback
+          loadGLTF(uri);
+        }
+      }
+
+      // ── Photo relief reconstruction ───────────────────────────────────────
+      // Builds a 3D relief mesh from the captured photo: the image is sampled
+      // into a height field (luminance -> depth, smoothed, center-weighted)
+      // and used to displace a textured grid. Front + mirrored back give the
+      // model volume. This is the on-device "reconstruction" of the subject.
+
+      function sampleImage(img, S) {
+        var cnv = document.createElement('canvas');
+        cnv.width = S;
+        cnv.height = S;
+        var ctx = cnv.getContext('2d');
+        ctx.drawImage(img, 0, 0, S, S);
+        var data = ctx.getImageData(0, 0, S, S).data;
+        var heights = new Float32Array(S * S);
+        var colors = new Uint8Array(S * S * 3);
+        for (var i = 0; i < S * S; i++) {
+          var r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+          heights[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+          colors[i * 3] = r;
+          colors[i * 3 + 1] = g;
+          colors[i * 3 + 2] = b;
+        }
+        return { heights: heights, colors: colors, size: S };
+      }
+
+      function boxBlur(src, S) {
+        var out = new Float32Array(S * S);
+        for (var y = 0; y < S; y++) {
+          for (var x = 0; x < S; x++) {
+            var sum = 0, cnt = 0;
+            for (var dy = -1; dy <= 1; dy++) {
+              for (var dx = -1; dx <= 1; dx++) {
+                var nx = x + dx, ny = y + dy;
+                if (nx >= 0 && nx < S && ny >= 0 && ny < S) {
+                  sum += src[ny * S + nx];
+                  cnt++;
+                }
+              }
+            }
+            out[y * S + x] = sum / cnt;
+          }
+        }
+        return out;
+      }
+
+      function reliefDepth(heights, S, ix, iy, depthScale) {
+        var h = heights[iy * S + ix];
+        // Center-weighted falloff: il soggetto (centro foto) emerge,
+        // i bordi (sfondo) restano piatti
+        var nx = (ix / (S - 1)) * 2 - 1;
+        var ny = (iy / (S - 1)) * 2 - 1;
+        var falloff = Math.max(0, 1 - (nx * nx + ny * ny) * 0.6);
+        var isEdge = ix === 0 || iy === 0 || ix === S - 1 || iy === S - 1;
+        if (isEdge) return 0;
+        return (0.12 + h * depthScale) * falloff;
+      }
+
+      function buildReliefGeometry(field, gridN, width, height, depthScale) {
+        var S = field.size; // S === gridN + 1
+        var geo = new THREE.PlaneGeometry(width, height, gridN, gridN);
+        var pos = geo.attributes.position;
+        for (var vi = 0; vi < pos.count; vi++) {
+          var ix = vi % S;
+          var iy = Math.floor(vi / S);
+          pos.setZ(vi, reliefDepth(field.heights, S, ix, iy, depthScale));
+        }
+        geo.computeVertexNormals();
+        return geo;
+      }
+
+      function buildRelief(img) {
+        var gridN = 96;
+        var S = gridN + 1;
+        var field = sampleImage(img, S);
+        field.heights = boxBlur(boxBlur(field.heights, S), S);
+
+        var aspect = img.height / img.width;
+        if (!isFinite(aspect) || aspect <= 0) aspect = 1;
+        aspect = Math.max(0.5, Math.min(1.8, aspect));
+        var width = 2;
+        var height = 2 * aspect;
+        var depthScale = 0.4;
+
+        var geo = buildReliefGeometry(field, gridN, width, height, depthScale);
+
+        var tex = new THREE.Texture(img);
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.encoding = THREE.sRGBEncoding;
+        tex.needsUpdate = true;
+
+        var mat = new THREE.MeshStandardMaterial({
+          map: tex,
+          roughness: 0.85,
+          metalness: 0.0,
+          side: THREE.DoubleSide,
+        });
+
+        var front = new THREE.Mesh(geo, mat);
+        front.castShadow = true;
+        front.receiveShadow = true;
+        var back = new THREE.Mesh(geo, mat);
+        back.rotation.y = Math.PI;
+        back.castShadow = true;
+
+        var group = new THREE.Group();
+        group.add(front);
+        group.add(back);
+
+        clearScene();
+        state.model = group;
+        scene.add(group);
+        placeholderGroup.visible = false;
+        fitCameraToObject(group);
+
+        var vertexCount = 2 * S * S;
+        var faceCount = 2 * gridN * gridN * 2;
+        showStatus('Modello 3D generato', 2000);
+        postToRN({
+          type: 'modelLoaded',
+          format: 'relief',
+          vertexCount: vertexCount,
+          faceCount: faceCount,
+        });
+
+        // Mesh a risoluzione ridotta per l'esportazione (inviata a RN)
+        sendExportMesh(img, width, height, depthScale);
+      }
+
+      function sendExportMesh(img, width, height, depthScale) {
+        try {
+          var gridM = 48;
+          var S = gridM + 1;
+          var field = sampleImage(img, S);
+          field.heights = boxBlur(field.heights, S);
+
+          var positions = [];
+          var uvs = [];
+          var colors = [];
+          var indices = [];
+
+          // Fronte (z+) e retro speculare (z-), bordi a z=0 cosicché
+          // le due metà combacino lungo il perimetro
+          for (var side = 0; side < 2; side++) {
+            var sign = side === 0 ? 1 : -1;
+            var base = side * S * S;
+            for (var iy = 0; iy < S; iy++) {
+              for (var ix = 0; ix < S; ix++) {
+                var x = (ix / gridM - 0.5) * width;
+                var y = (0.5 - iy / gridM) * height;
+                var z = sign * reliefDepth(field.heights, S, ix, iy, depthScale);
+                positions.push(
+                  Math.round(x * 10000) / 10000,
+                  Math.round(y * 10000) / 10000,
+                  Math.round(z * 10000) / 10000
+                );
+                uvs.push(
+                  Math.round((ix / gridM) * 10000) / 10000,
+                  Math.round((1 - iy / gridM) * 10000) / 10000
+                );
+                var ci = (iy * S + ix) * 3;
+                colors.push(field.colors[ci], field.colors[ci + 1], field.colors[ci + 2]);
+              }
+            }
+            for (var fy = 0; fy < gridM; fy++) {
+              for (var fx = 0; fx < gridM; fx++) {
+                var a = base + fy * S + fx;
+                var b = base + fy * S + fx + 1;
+                var c = base + (fy + 1) * S + fx;
+                var d = base + (fy + 1) * S + fx + 1;
+                if (side === 0) {
+                  indices.push(a, c, b, b, c, d);
+                } else {
+                  indices.push(a, b, c, b, d, c);
+                }
+              }
+            }
+          }
+
+          postToRN({
+            type: 'meshData',
+            positions: positions,
+            uvs: uvs,
+            colors: colors,
+            indices: indices,
+            vertexCount: positions.length / 3,
+            faceCount: indices.length / 3,
+          });
+        } catch (e) {
+          // L'esportazione userà il fallback; la visualizzazione non è compromessa
+          postToRN({ type: 'error', message: 'meshData: ' + e.message });
+        }
+      }
+
+      function loadRelief(base64, mime) {
+        showStatus('Generazione modello 3D...');
+        var img = new Image();
+        img.onload = function () {
+          try {
+            buildRelief(img);
+          } catch (e) {
+            showStatus('Errore generazione: ' + e.message, 4000);
+            postToRN({ type: 'modelError', error: e.message });
+          }
+        };
+        img.onerror = function () {
+          postToRN({ type: 'modelError', error: 'Immagine sorgente non valida' });
+        };
+        img.src = 'data:' + (mime || 'image/jpeg') + ';base64,' + base64;
+      }
+
+      // ── Selection ─────────────────────────────────────────────────────────
+      function clearSelectionHighlight() {
+        if (state.highlightMesh) {
+          // Restore original materials
+          state.originalMaterials.forEach(function (mat, mesh) {
+            mesh.material = mat;
+          });
+          state.originalMaterials.clear();
+          state.highlightMesh = null;
+        }
+      }
+
+      function highlightMesh(mesh) {
+        clearSelectionHighlight();
+        if (!mesh) return;
+        var origMat = mesh.material;
+        state.originalMaterials.set(mesh, origMat);
+        var highlightMat = new THREE.MeshStandardMaterial({
+          color: 0xF59E0B,
+          emissive: 0xD97706,
+          emissiveIntensity: 0.4,
+          metalness: 0.1,
+          roughness: 0.4,
+          transparent: true,
+          opacity: 0.85,
+        });
+        mesh.material = highlightMat;
+        state.highlightMesh = mesh;
+      }
+
+      // ── Annotation markers ────────────────────────────────────────────────
+      function createAnnotationMarker(point) {
+        var geo = new THREE.SphereGeometry(0.05, 12, 12);
+        var mat = new THREE.MeshStandardMaterial({
+          color: 0xEF4444,
+          emissive: 0xDC2626,
+          emissiveIntensity: 0.6,
+          metalness: 0,
+          roughness: 0.3,
+        });
+        var sphere = new THREE.Mesh(geo, mat);
+        sphere.position.copy(point);
+        // Add ring around marker
+        var ringGeo = new THREE.RingGeometry(0.06, 0.09, 16);
+        var ringMat = new THREE.MeshBasicMaterial({
+          color: 0xEF4444,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.7,
+        });
+        var ring = new THREE.Mesh(ringGeo, ringMat);
+        sphere.add(ring);
+        return sphere;
+      }
+
+      // ── Touch / Click handling ────────────────────────────────────────────
+      function getCanvasCoords(event) {
+        var rect = canvas.getBoundingClientRect();
+        var clientX, clientY;
+        if (event.touches && event.touches.length > 0) {
+          clientX = event.touches[0].clientX;
+          clientY = event.touches[0].clientY;
+        } else if (event.changedTouches && event.changedTouches.length > 0) {
+          clientX = event.changedTouches[0].clientX;
+          clientY = event.changedTouches[0].clientY;
+        } else {
+          clientX = event.clientX;
+          clientY = event.clientY;
+        }
+        return {
+          x: ((clientX - rect.left) / rect.width) * 2 - 1,
+          y: -((clientY - rect.top) / rect.height) * 2 + 1,
+        };
+      }
+
+      var touchStartPos = null;
+      var touchStartTime = 0;
+
+      function onTouchStart(event) {
+        if (state.mode === 'view') return;
+        var coords = getCanvasCoords(event);
+        touchStartPos = coords;
+        touchStartTime = Date.now();
+      }
+
+      function onTouchEnd(event) {
+        if (state.mode === 'view') return;
+        if (!touchStartPos) return;
+
+        var elapsed = Date.now() - touchStartTime;
+        if (elapsed > 400) { touchStartPos = null; return; } // long press = pan
+
+        var coords = getCanvasCoords(event);
+        var dx = Math.abs(coords.x - touchStartPos.x);
+        var dy = Math.abs(coords.y - touchStartPos.y);
+        if (dx > 0.05 || dy > 0.05) { touchStartPos = null; return; } // moved = orbit
+
+        touchStartPos = null;
+        handleInteraction(coords);
+      }
+
+      function onClick(event) {
+        if (state.mode === 'view') return;
+        var coords = getCanvasCoords(event);
+        handleInteraction(coords);
+      }
+
+      function handleInteraction(coords) {
+        raycaster.setFromCamera(coords, camera);
+
+        // Raycast against model or placeholder
+        var targets = [];
+        if (state.model) {
+          state.model.traverse(function (child) {
+            if (child.isMesh) targets.push(child);
+          });
+        } else {
+          placeholderGroup.traverse(function (child) {
+            if (child.isMesh) targets.push(child);
+          });
+        }
+
+        var intersects = raycaster.intersectObjects(targets, false);
+
+        if (intersects.length === 0) {
+          if (state.mode === 'select') {
+            clearSelectionHighlight();
+            postToRN({ type: 'selectionCleared' });
+          }
+          return;
+        }
+
+        var hit = intersects[0];
+        var point = { x: hit.point.x, y: hit.point.y, z: hit.point.z };
+        var meshName = hit.object.name || 'Mesh';
+        var faceIndex = hit.faceIndex !== undefined ? hit.faceIndex : 0;
+
+        if (state.mode === 'select') {
+          highlightMesh(hit.object);
+          state.selectedFace = { point, faceIndex, meshName };
+          postToRN({
+            type: 'areaSelected',
+            point: point,
+            faceIndex: faceIndex,
+            meshName: meshName,
+          });
+          showStatus('Area selezionata: ' + meshName, 3000);
+        } else if (state.mode === 'annotate') {
+          state.annotationIdCounter++;
+          var annId = 'ann_' + state.annotationIdCounter;
+          var marker = createAnnotationMarker(hit.point);
+          scene.add(marker);
+          state.annotations.push({
+            id: annId,
+            point: point,
+            text: '',
+            marker: marker,
+          });
+          postToRN({
+            type: 'annotationPlaced',
+            id: annId,
+            point: point,
+            meshName: meshName,
+          });
+          showStatus('Annotazione aggiunta', 2000);
+        }
+      }
+
+      // Attach events
+      canvas.addEventListener('touchstart', onTouchStart, { passive: true });
+      canvas.addEventListener('touchend', onTouchEnd, { passive: true });
+      canvas.addEventListener('click', onClick);
+
+      // ── Resize ────────────────────────────────────────────────────────────
+      function onResize() {
+        var w = container.clientWidth;
+        var h = container.clientHeight;
+        if (w === 0 || h === 0) return;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      }
+      window.addEventListener('resize', onResize);
+
+      // ── Animation loop (60fps cap) ────────────────────────────────────────
+      var clock = new THREE.Clock();
+      var lastFrameTime = 0;
+      var TARGET_MS = 1000 / 60;
+
+      function animate(timestamp) {
+        requestAnimationFrame(animate);
+
+        var delta = timestamp - lastFrameTime;
+        if (delta < TARGET_MS - 0.5) return;
+        lastFrameTime = timestamp - (delta % TARGET_MS);
+
+        var dt = clock.getDelta();
+        var elapsed = clock.getElapsedTime();
+
+        if (!state.model && placeholderGroup.visible) {
+          placeholderGroup.rotation.y += dt * 0.7;
+          placeholderGroup.rotation.x = Math.sin(elapsed * 0.3) * 0.2;
+        }
+
+        // Billboard annotation markers + pulse
+        state.annotations.forEach(function (ann) {
+          if (ann.marker) {
+            ann.marker.quaternion.copy(camera.quaternion);
+            var s = 1 + 0.18 * Math.sin(elapsed * 3.5 + ann.id.length);
+            ann.marker.scale.setScalar(s);
+          }
+        });
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      animate(0);
+
+      // ── Message handling from React Native ───────────────────────────────
+      function handleMessage(data) {
+        try {
+          var msg = typeof data === 'string' ? JSON.parse(data) : data;
+
+          switch (msg.type) {
+
+            case 'loadModel':
+              loadModel(msg.uri, msg.format);
+              break;
+
+            case 'loadRelief':
+              // Ricostruzione 3D dalla foto catturata (inviata come base64)
+              loadRelief(msg.image, msg.mime);
+              break;
+
+            case 'loadModelContent':
+              // Content passed directly from RN (avoids file:// XHR restriction on Android).
+              // encoding 'base64' is used for binary formats (STL/GLB).
+              (function() {
+                try {
+                  var fmt = (msg.format || 'gltf').toLowerCase();
+                  var mime = fmt === 'obj' ? 'model/obj'
+                    : fmt === 'stl' ? 'model/stl'
+                    : fmt === 'glb' ? 'model/gltf-binary'
+                    : 'model/gltf+json';
+                  var payload = msg.content;
+                  if (msg.encoding === 'base64') {
+                    var bin = atob(msg.content);
+                    var bytes = new Uint8Array(bin.length);
+                    for (var bi = 0; bi < bin.length; bi++) {
+                      bytes[bi] = bin.charCodeAt(bi);
+                    }
+                    payload = bytes.buffer;
+                  }
+                  var blob = new Blob([payload], { type: mime });
+                  var blobUrl = URL.createObjectURL(blob);
+                  if (fmt === 'obj') {
+                    loadOBJ(blobUrl);
+                  } else if (fmt === 'stl') {
+                    loadSTL(blobUrl);
+                  } else {
+                    loadGLTF(blobUrl);
+                  }
+                } catch (e) {
+                  postToRN({ type: 'modelError', error: e.message });
+                }
+              })();
+              break;
+
+            case 'setMode':
+              var validModes = ['view', 'select', 'annotate'];
+              if (validModes.indexOf(msg.mode) >= 0) {
+                state.mode = msg.mode;
+                if (msg.mode === 'view') {
+                  clearSelectionHighlight();
+                  controls.enableRotate = true;
+                  controls.enablePan = true;
+                } else if (msg.mode === 'select') {
+                  clearSelectionHighlight();
+                  controls.enableRotate = true;
+                  controls.enablePan = false;
+                } else if (msg.mode === 'annotate') {
+                  controls.enableRotate = true;
+                  controls.enablePan = false;
+                }
+                updateModeIndicator();
+                postToRN({ type: 'modeChanged', mode: state.mode });
+              }
+              break;
+
+            case 'clearSelection':
+              clearSelectionHighlight();
+              state.selectedFace = null;
+              postToRN({ type: 'selectionCleared' });
+              break;
+
+            case 'getAnnotations':
+              var anns = state.annotations.map(function (a) {
+                return { id: a.id, point: a.point, text: a.text };
+              });
+              postToRN({ type: 'annotations', data: anns });
+              break;
+
+            case 'addAnnotation':
+              if (msg.point && msg.text !== undefined) {
+                state.annotationIdCounter++;
+                var newId = 'ann_ext_' + state.annotationIdCounter;
+                var pt = new THREE.Vector3(msg.point.x, msg.point.y, msg.point.z);
+                var mk = createAnnotationMarker(pt);
+                scene.add(mk);
+                state.annotations.push({ id: newId, point: msg.point, text: msg.text, marker: mk });
+                postToRN({ type: 'annotationAdded', id: newId });
+              }
+              break;
+
+            case 'removeAnnotation':
+              if (msg.id) {
+                var idx = -1;
+                for (var i = 0; i < state.annotations.length; i++) {
+                  if (state.annotations[i].id === msg.id) { idx = i; break; }
+                }
+                if (idx >= 0) {
+                  var removed = state.annotations.splice(idx, 1)[0];
+                  if (removed.marker) scene.remove(removed.marker);
+                  postToRN({ type: 'annotationRemoved', id: msg.id });
+                }
+              }
+              break;
+
+            case 'setModelProperty':
+              // brightness / opacity adjustments
+              if (state.model) {
+                state.model.traverse(function (child) {
+                  if (child.isMesh && child !== state.highlightMesh) {
+                    if (msg.property === 'opacity' && msg.value !== undefined) {
+                      child.material.transparent = msg.value < 1.0;
+                      child.material.opacity = Math.max(0, Math.min(1, msg.value));
+                      child.material.needsUpdate = true;
+                    }
+                    if (msg.property === 'brightness' && msg.value !== undefined) {
+                      var b = Math.max(0, Math.min(2, msg.value));
+                      if (child.material.emissive) {
+                        child.material.emissiveIntensity = Math.max(0, b - 1);
+                      }
+                      // Adjust color brightness
+                      if (child.material.color) {
+                        var baseColor = new THREE.Color(0x8B5CF6);
+                        baseColor.multiplyScalar(Math.min(b, 1));
+                        child.material.color.copy(baseColor);
+                      }
+                      child.material.needsUpdate = true;
+                    }
+                  }
+                });
+              }
+              break;
+
+            case 'resetCamera':
+              if (state.model) {
+                fitCameraToObject(state.model);
+              } else {
+                camera.position.set(2.5, 2, 3.5);
+                controls.target.set(0, 0, 0);
+                controls.update();
+              }
+              break;
+
+            case 'ping':
+              postToRN({ type: 'pong' });
+              break;
+
+            default:
+              break;
+          }
+        } catch (e) {
+          postToRN({ type: 'error', message: e.message });
+        }
+      }
+
+      // Listen for messages from React Native WebView
+      window.addEventListener('message', function (event) {
+        handleMessage(event.data);
+      });
+
+      // Also support direct invocation from RN injectedJavaScript
+      window.wildfoxReceiveMessage = function (data) {
+        handleMessage(data);
+      };
+
+      // Signal ready
+      setTimeout(function () {
+        if (window.__threeLoadError) return;
+        loadingScreen.classList.add('hidden');
+        setTimeout(function() { loadingScreen.style.display = 'none'; }, 450);
+        postToRN({ type: 'viewerReady' });
+        showStatus('Viewer pronto', 1500);
+      }, 300);
+
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - claude/3d-capture-app-editor-edQGo
+      - main
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    name: Build Wildfox 3D APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK components + NDK 25.1.8937393
+        run: |
+          # Install the exact NDK version required by react-native 0.73 / expo 50
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393"
+          yes | sdkmanager --licenses 2>/dev/null || true
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "NDK 25.1 installato: $(ls $ANDROID_SDK_ROOT/ndk/25.1.8937393 2>/dev/null && echo SI || echo NO)"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Patch expo-modules-core for AGP 8.x compatibility
+        run: python3 scripts/patch-expo-modules.py
+
+      - name: Generate embedded viewer (Three.js inlined, offline support)
+        run: python3 scripts/bundle-threejs.py
+
+      - name: Generate native Android project (expo prebuild)
+        run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
+        env:
+          EXPO_NO_TELEMETRY: 1
+          CI: 1
+
+      - name: Create local.properties
+        run: |
+          # Only set sdk.dir — Gradle will resolve NDK via android.ndkVersion from build.gradle
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+          cat android/local.properties
+
+      - name: Patch gradle.properties
+        run: |
+          echo "" >> android/gradle.properties
+          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" >> android/gradle.properties
+          echo "org.gradle.parallel=true" >> android/gradle.properties
+          echo "org.gradle.configureondemand=true" >> android/gradle.properties
+
+      - name: Make Gradle executable
+        run: chmod +x android/gradlew
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - name: Build release APK (JS bundle incluso)
+        working-directory: android
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_full.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "=== PRIMA ECCEZIONE ==="
+            grep -m1 -A20 "Caused by\|Exception\|FAILURE" /tmp/gradle_full.log || true
+            echo "=== ULTIME 50 RIGHE ==="
+            tail -50 /tmp/gradle_full.log
+            exit $EXIT_CODE
+          fi
+
+      - name: Show APK info
+        if: success()
+        run: |
+          APK=$(find android/app/build/outputs/apk/release -name "*.apk" 2>/dev/null | head -1)
+          echo "APK: $APK ($(du -sh "$APK" | cut -f1))"
+
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wildfox3d-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
