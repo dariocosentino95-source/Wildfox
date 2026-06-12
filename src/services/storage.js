@@ -126,6 +126,8 @@ const DEFAULT_SETTINGS = {
   captureQuality: 'high',
   autoSave: true,
   language: 'it',
+  serverEnabled: false,
+  serverHost: '',
 };
 
 export async function getSettings() {

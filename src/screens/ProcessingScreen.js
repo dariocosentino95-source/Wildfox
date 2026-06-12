@@ -12,26 +12,34 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import colors from '../theme/colors';
-import { reconstructModel, reconstructFromVideo } from '../services/photogrammetry';
+import { reconstructModel, reconstructFromVideo, initFromStorage, getServerConfig, DEVICE_STAGES, SERVER_STAGES } from '../services/photogrammetry';
 import { saveProject } from '../services/storage';
 import { generateId, formatModelStats } from '../utils/modelUtils';
 
 // ─── Processing stages for display ───────────────────────────────────────────
 
-const STAGE_ICONS = {
-  'Analisi immagini...':         'search',
-  'Rilevamento punti chiave...': 'git-network',
-  'Ricostruzione punto cloud...':'stats-chart',
-  'Generazione mesh...':         'cube',
-  'Ottimizzazione modello...':   'sparkles',
-  'Completato!':                 'checkmark-circle',
+const DEVICE_STAGE_ICONS = {
+  'Analisi immagini...':          'search',
+  'Rilevamento punti chiave...':  'git-network',
+  'Ricostruzione punto cloud...': 'stats-chart',
+  'Generazione mesh...':          'cube',
+  'Ottimizzazione modello...':    'sparkles',
+  'Completato!':                  'checkmark-circle',
+};
+
+const SERVER_STAGE_ICONS = {
+  'Connessione al server...': 'wifi',
+  'Caricamento foto...':      'cloud-upload',
+  'Elaborazione GPU...':      'hardware-chip',
+  'Download modello 3D...':   'cloud-download',
+  'Completato!':              'checkmark-circle',
 };
 
 // ─── Stage item ───────────────────────────────────────────────────────────────
 
-function StageItem({ label, status }) {
+function StageItem({ label, status, iconMap }) {
   // status: 'waiting' | 'active' | 'done'
-  const icon = STAGE_ICONS[label] || 'ellipse-outline';
+  const icon = (iconMap || DEVICE_STAGE_ICONS)[label] || 'ellipse-outline';
 
   return (
     <View style={[styles.stageItem, status === 'active' && styles.stageItemActive]}>
@@ -65,15 +73,6 @@ function StageItem({ label, status }) {
 
 // ─── ProcessingScreen ─────────────────────────────────────────────────────────
 
-const STAGES = [
-  'Analisi immagini...',
-  'Rilevamento punti chiave...',
-  'Ricostruzione punto cloud...',
-  'Generazione mesh...',
-  'Ottimizzazione modello...',
-  'Completato!',
-];
-
 export default function ProcessingScreen() {
   const navigation = useNavigation();
   const route = useRoute();
@@ -81,9 +80,10 @@ export default function ProcessingScreen() {
 
   const { imageUris, videoUri, projectName = 'Modello 3D', source } = route.params || {};
 
+  const [isServerMode, setIsServerMode] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentStageIndex, setCurrentStageIndex] = useState(0);
-  const [currentLabel, setCurrentLabel] = useState(STAGES[0]);
+  const [currentLabel, setCurrentLabel] = useState('Inizializzazione...');
   const [isDone, setIsDone] = useState(false);
   const [error, setError] = useState(null);
   const [isCancelled, setIsCancelled] = useState(false);
@@ -122,10 +122,22 @@ export default function ProcessingScreen() {
     return () => sub.remove();
   }, []);
 
-  // Start reconstruction
+  // Start reconstruction (after lazy-loading server config from storage)
   useEffect(() => {
-    startReconstruction();
+    let active = true;
+    const run = async () => {
+      await initFromStorage();
+      if (!active) return;
+      const cfg = getServerConfig();
+      const serverMode = cfg.enabled && !!cfg.host;
+      setIsServerMode(serverMode);
+      const stages = serverMode ? SERVER_STAGES : DEVICE_STAGES;
+      setCurrentLabel(stages[0]);
+      startReconstruction();
+    };
+    run();
     return () => {
+      active = false;
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -144,7 +156,9 @@ export default function ProcessingScreen() {
 
     const onStageChange = (label) => {
       setCurrentLabel(label);
-      const idx = STAGES.indexOf(label);
+      const cfg = getServerConfig();
+      const stages = cfg.enabled && cfg.host ? SERVER_STAGES : DEVICE_STAGES;
+      const idx = stages.indexOf(label);
       if (idx >= 0) setCurrentStageIndex(idx);
     };
 
@@ -174,9 +188,11 @@ export default function ProcessingScreen() {
 
       await saveProject(project);
 
+      const cfg = getServerConfig();
+      const stages = cfg.enabled && cfg.host ? SERVER_STAGES : DEVICE_STAGES;
       setIsDone(true);
       setProgress(100);
-      setCurrentStageIndex(STAGES.length - 1);
+      setCurrentStageIndex(stages.length - 1);
       setCurrentLabel('Completato!');
 
       // Navigate to viewer after short delay
@@ -215,10 +231,12 @@ export default function ProcessingScreen() {
   }, [navigation]);
 
   const handleRetry = useCallback(() => {
+    const cfg = getServerConfig();
+    const stages = cfg.enabled && cfg.host ? SERVER_STAGES : DEVICE_STAGES;
     setError(null);
     setProgress(0);
     setCurrentStageIndex(0);
-    setCurrentLabel(STAGES[0]);
+    setCurrentLabel(stages[0]);
     setIsDone(false);
     startReconstruction();
   }, [startReconstruction]);
@@ -235,7 +253,15 @@ export default function ProcessingScreen() {
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Elaborazione 3D</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerTitle}>Elaborazione 3D</Text>
+          {isServerMode && (
+            <View style={styles.serverBadge}>
+              <Ionicons name="hardware-chip" size={10} color={colors.success} />
+              <Text style={styles.serverBadgeText}>GPU Server</Text>
+            </View>
+          )}
+        </View>
         {!isDone && !error && (
           <TouchableOpacity onPress={handleCancel} style={styles.cancelBtn}>
             <Text style={styles.cancelBtnText}>Annulla</Text>
@@ -280,14 +306,20 @@ export default function ProcessingScreen() {
         )}
 
         {/* Stages list */}
-        <View style={styles.stagesList}>
-          {STAGES.map((stage, idx) => {
-            let status = 'waiting';
-            if (idx < currentStageIndex) status = 'done';
-            else if (idx === currentStageIndex) status = isDone ? 'done' : 'active';
-            return <StageItem key={stage} label={stage} status={status} />;
-          })}
-        </View>
+        {(() => {
+          const stages = isServerMode ? SERVER_STAGES : DEVICE_STAGES;
+          const iconMap = isServerMode ? SERVER_STAGE_ICONS : DEVICE_STAGE_ICONS;
+          return (
+            <View style={styles.stagesList}>
+              {stages.map((stage, idx) => {
+                let status = 'waiting';
+                if (idx < currentStageIndex) status = 'done';
+                else if (idx === currentStageIndex) status = isDone ? 'done' : 'active';
+                return <StageItem key={stage} label={stage} status={status} iconMap={iconMap} />;
+              })}
+            </View>
+          );
+        })()}
 
         {/* Source info */}
         <View style={styles.sourceInfo}>
@@ -342,10 +374,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: colors.border,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerTitle: {
     color: colors.textPrimary,
     fontSize: 18,
     fontWeight: '700',
+  },
+  serverBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.success + '22',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.success + '55',
+  },
+  serverBadgeText: {
+    color: colors.success,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   cancelBtn: {
     paddingHorizontal: 12,

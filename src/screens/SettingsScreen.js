@@ -8,12 +8,13 @@ import {
   TextInput,
   Switch,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import colors from '../theme/colors';
 import { getSettings, saveSettings, clearAllData } from '../services/storage';
-import { setApiEndpoint } from '../services/photogrammetry';
+import { setApiEndpoint, setServerConfig, testServerConnection } from '../services/photogrammetry';
 
 // ─── SettingRow ───────────────────────────────────────────────────────────────
 
@@ -51,10 +52,18 @@ export default function SettingsScreen() {
     captureQuality: 'high',
     autoSave: true,
     language: 'it',
+    serverEnabled: false,
+    serverHost: '',
   });
   const [editingEndpoint, setEditingEndpoint] = useState(false);
   const [endpointDraft, setEndpointDraft] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Server PC state
+  const [serverHostDraft, setServerHostDraft] = useState('');
+  const [editingServer, setEditingServer] = useState(false);
+  const [serverTestState, setServerTestState] = useState(null); // null | 'testing' | {ok, engine, gpu, error}
+  const [savingServer, setSavingServer] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -64,6 +73,8 @@ export default function SettingsScreen() {
     const s = await getSettings();
     setSettings(s);
     setEndpointDraft(s.apiEndpoint || '');
+    setServerHostDraft(s.serverHost || '');
+    if (s.serverHost) setServerConfig(s.serverHost, s.serverEnabled);
   };
 
   const handleToggleAutoSave = async (val) => {
@@ -99,6 +110,38 @@ export default function SettingsScreen() {
     const updated = { ...settings, defaultExportFormat: format };
     setSettings(updated);
     await saveSettings({ defaultExportFormat: format });
+  };
+
+  const handleToggleServer = async (val) => {
+    const updated = { ...settings, serverEnabled: val };
+    setSettings(updated);
+    setServerConfig(updated.serverHost, val);
+    await saveSettings({ serverEnabled: val });
+  };
+
+  const handleTestServer = async () => {
+    const host = serverHostDraft.trim();
+    if (!host) {
+      Alert.alert('Host mancante', 'Inserisci l\'indirizzo IP del PC (es. 192.168.1.100:8765)');
+      return;
+    }
+    setServerTestState('testing');
+    const result = await testServerConnection(host);
+    setServerTestState(result);
+  };
+
+  const handleSaveServer = async () => {
+    const host = serverHostDraft.trim();
+    setSavingServer(true);
+    try {
+      setServerConfig(host, settings.serverEnabled);
+      await saveSettings({ serverHost: host });
+      setSettings((s) => ({ ...s, serverHost: host }));
+      setEditingServer(false);
+      setServerTestState(null);
+    } finally {
+      setSavingServer(false);
+    }
   };
 
   const handleClearData = () => {
@@ -274,6 +317,118 @@ export default function SettingsScreen() {
             <Text style={styles.apiNoteText}>
               In modalità offline, viene usata la ricostruzione simulata con modello di prova.
             </Text>
+          </View>
+        </View>
+
+        {/* Server PC */}
+        <SectionHeader title="Server PC (GPU)" />
+        <View style={styles.card}>
+          {/* Enable toggle */}
+          <SettingRow
+            icon="hardware-chip"
+            label="Usa Server PC"
+            description="Invia foto al PC per ricostruzione GPU"
+          >
+            <Switch
+              value={settings.serverEnabled}
+              onValueChange={handleToggleServer}
+              trackColor={{ false: colors.border, true: colors.accent }}
+              thumbColor={colors.white}
+              ios_backgroundColor={colors.border}
+            />
+          </SettingRow>
+
+          <View style={styles.rowDivider} />
+
+          {/* Host input */}
+          <View style={styles.serverHostRow}>
+            <View style={styles.serverHostLabel}>
+              <Ionicons name="wifi" size={14} color={colors.textMuted} />
+              <Text style={styles.serverHostText}>
+                {settings.serverHost ? settings.serverHost : 'Nessun host configurato'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                setServerHostDraft(settings.serverHost || '');
+                setEditingServer(true);
+                setServerTestState(null);
+              }}
+            >
+              <Ionicons name="pencil" size={18} color={colors.accent} />
+            </TouchableOpacity>
+          </View>
+
+          {editingServer && (
+            <View style={styles.serverEditBlock}>
+              <TextInput
+                style={styles.endpointInput}
+                value={serverHostDraft}
+                onChangeText={(v) => { setServerHostDraft(v); setServerTestState(null); }}
+                placeholder="192.168.1.100:8765"
+                placeholderTextColor={colors.textDisabled}
+                autoCapitalize="none"
+                keyboardType="url"
+                autoCorrect={false}
+              />
+              {/* Test result */}
+              {serverTestState === 'testing' && (
+                <View style={styles.serverTestRow}>
+                  <ActivityIndicator size="small" color={colors.accent} />
+                  <Text style={styles.serverTestText}>Test connessione...</Text>
+                </View>
+              )}
+              {serverTestState && serverTestState !== 'testing' && (
+                <View style={styles.serverTestRow}>
+                  <View style={[styles.serverStatusDot, { backgroundColor: serverTestState.ok ? colors.success : colors.error }]} />
+                  {serverTestState.ok ? (
+                    <Text style={[styles.serverTestText, { color: colors.success }]}>
+                      Connesso · {serverTestState.engine === 'none' ? 'Rilievo fallback' : serverTestState.engine}
+                      {serverTestState.gpu ? ` · ${serverTestState.gpu}` : ''}
+                    </Text>
+                  ) : (
+                    <Text style={[styles.serverTestText, { color: colors.error }]}>
+                      {serverTestState.error}
+                    </Text>
+                  )}
+                </View>
+              )}
+              <View style={styles.endpointActions}>
+                <TouchableOpacity style={styles.serverTestBtn} onPress={handleTestServer}>
+                  <Ionicons name="pulse" size={14} color={colors.accent} />
+                  <Text style={styles.serverTestBtnText}>Test</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.endpointCancelBtn}
+                  onPress={() => { setEditingServer(false); setServerTestState(null); }}
+                >
+                  <Text style={styles.endpointCancelText}>Annulla</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.endpointSaveBtn}
+                  onPress={handleSaveServer}
+                  disabled={savingServer}
+                >
+                  <Text style={styles.endpointSaveText}>{savingServer ? 'Salvo...' : 'Salva'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          <View style={styles.rowDivider} />
+
+          {/* Info card */}
+          <View style={styles.serverInfoCard}>
+            <Ionicons name="information-circle-outline" size={14} color={colors.info} style={{ marginTop: 1 }} />
+            <View style={styles.serverInfoText}>
+              <Text style={[styles.apiNoteText, { color: colors.textSecondary }]}>
+                Sul PC: installa Meshroom (GPU) e poi esegui:
+              </Text>
+              <Text style={styles.serverInfoCode}>python server/wildfox_server.py</Text>
+              <Text style={styles.apiNoteText}>
+                La RTX 5060 accelererà la ricostruzione. Senza Meshroom usa la modalità rilievo.
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -597,5 +752,84 @@ const styles = StyleSheet.create({
   aboutValue: {
     color: colors.textMuted,
     fontSize: 13,
+  },
+  // Server PC styles
+  serverHostRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  serverHostLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  serverHostText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'monospace',
+    flex: 1,
+  },
+  serverEditBlock: {
+    gap: 8,
+    paddingTop: 4,
+  },
+  serverTestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  serverStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  serverTestText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    flex: 1,
+  },
+  serverTestBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: colors.accentMuted,
+    borderWidth: 1,
+    borderColor: colors.accent + '66',
+  },
+  serverTestBtnText: {
+    color: colors.accentLight,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  serverInfoCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingTop: 4,
+    backgroundColor: colors.info + '11',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: colors.info + '33',
+  },
+  serverInfoText: {
+    flex: 1,
+    gap: 4,
+  },
+  serverInfoCode: {
+    color: colors.accentLight,
+    fontSize: 11,
+    fontFamily: 'monospace',
+    backgroundColor: colors.backgroundTertiary,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
 });
