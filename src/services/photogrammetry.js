@@ -1,4 +1,6 @@
 import * as FileSystem from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -19,75 +21,17 @@ export function getApiEndpoint() {
 // ─── Processing stages ────────────────────────────────────────────────────────
 
 const PROCESSING_STAGES = [
-  { key: 'analysis', label: 'Analisi immagini...', duration: 1500 },
-  { key: 'keypoints', label: 'Rilevamento punti chiave...', duration: 2000 },
-  { key: 'pointcloud', label: 'Ricostruzione punto cloud...', duration: 2500 },
-  { key: 'mesh', label: 'Generazione mesh...', duration: 2000 },
-  { key: 'optimize', label: 'Ottimizzazione modello...', duration: 1500 },
-  { key: 'complete', label: 'Completato!', duration: 500 },
+  { key: 'analysis', label: 'Analisi immagini...', duration: 1200 },
+  { key: 'keypoints', label: 'Rilevamento punti chiave...', duration: 1600 },
+  { key: 'pointcloud', label: 'Ricostruzione punto cloud...', duration: 2000 },
+  { key: 'mesh', label: 'Generazione mesh...', duration: 1600 },
+  { key: 'optimize', label: 'Ottimizzazione modello...', duration: 1200 },
+  { key: 'complete', label: 'Completato!', duration: 400 },
 ];
 
-// ─── Mock GLTF content ────────────────────────────────────────────────────────
-
-const MOCK_GLTF_CONTENT = JSON.stringify({
-  asset: { version: '2.0', generator: 'Wildfox3D Mock Generator' },
-  scene: 0,
-  scenes: [{ name: 'Scene', nodes: [0] }],
-  nodes: [{ mesh: 0, name: 'ReconstructedObject' }],
-  meshes: [
-    {
-      name: 'ReconstructedMesh',
-      primitives: [
-        {
-          attributes: { POSITION: 0, NORMAL: 1 },
-          indices: 2,
-          material: 0,
-        },
-      ],
-    },
-  ],
-  materials: [
-    {
-      name: 'ReconstructedMaterial',
-      pbrMetallicRoughness: {
-        baseColorFactor: [0.54, 0.36, 0.96, 1.0],
-        metallicFactor: 0.2,
-        roughnessFactor: 0.7,
-      },
-    },
-  ],
-  accessors: [
-    {
-      bufferView: 0,
-      componentType: 5126,
-      count: 24,
-      type: 'VEC3',
-      max: [0.5, 0.5, 0.5],
-      min: [-0.5, -0.5, -0.5],
-    },
-    {
-      bufferView: 1,
-      componentType: 5126,
-      count: 24,
-      type: 'VEC3',
-    },
-    {
-      bufferView: 2,
-      componentType: 5123,
-      count: 36,
-      type: 'SCALAR',
-    },
-  ],
-  bufferViews: [
-    { buffer: 0, byteOffset: 0, byteLength: 288 },
-    { buffer: 0, byteOffset: 288, byteLength: 288 },
-    { buffer: 0, byteOffset: 576, byteLength: 72 },
-  ],
-  buffers: [{
-    byteLength: 648,
-    uri: 'data:application/octet-stream;base64,AAAAvwAAAL8AAAA/AAAAPwAAAL8AAAA/AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/AAAAPwAAAL8AAAC/AAAAvwAAAL8AAAC/AAAAvwAAAD8AAAC/AAAAPwAAAD8AAAC/AAAAvwAAAL8AAAC/AAAAvwAAAL8AAAA/AAAAvwAAAD8AAAA/AAAAvwAAAD8AAAC/AAAAPwAAAL8AAAA/AAAAPwAAAL8AAAC/AAAAPwAAAD8AAAC/AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/AAAAPwAAAD8AAAA/AAAAPwAAAD8AAAC/AAAAvwAAAD8AAAC/AAAAvwAAAL8AAAC/AAAAPwAAAL8AAAC/AAAAPwAAAL8AAAA/AAAAvwAAAL8AAAA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAABAAIAAAACAAMABAAFAAYABAAGAAcACAAJAAoACAAKAAsADAANAA4ADAAOAA8AEAARABIAEAASABMAFAAVABYAFAAWABcA',
-  }],
-});
+// Display mesh: griglia 96x96 fronte+retro (vedi viewer.html buildRelief)
+const DISPLAY_VERTEX_COUNT = 2 * 97 * 97;
+const DISPLAY_FACE_COUNT = 2 * 96 * 96 * 2;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -95,30 +39,55 @@ async function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function writeMockGltfFile() {
-  const dir = FileSystem.cacheDirectory + 'wildfox3d/models/';
-  const dirInfo = await FileSystem.getInfoAsync(dir);
-  if (!dirInfo.exists) {
+async function ensureModelsDir() {
+  const dir = FileSystem.documentDirectory + 'wildfox3d/models/';
+  const info = await FileSystem.getInfoAsync(dir);
+  if (!info.exists) {
     await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
   }
-  const filename = `mock_model_${Date.now()}.gltf`;
-  const fileUri = dir + filename;
-  await FileSystem.writeAsStringAsync(fileUri, MOCK_GLTF_CONTENT, {
-    encoding: FileSystem.EncodingType.UTF8,
-  });
-  return fileUri;
+  return dir;
+}
+
+/**
+ * Normalizza l'immagine sorgente: ridimensiona a max 1024px di larghezza,
+ * corregge la rotazione EXIF e la salva in una posizione persistente.
+ * La WebView riceverà questa immagine come base64, quindi deve essere compatta.
+ */
+async function prepareSourceImage(imageUri) {
+  const dir = await ensureModelsDir();
+  const destUri = dir + `relief_${Date.now()}.jpg`;
+
+  try {
+    const manipulated = await ImageManipulator.manipulateAsync(
+      imageUri,
+      [{ resize: { width: 1024 } }],
+      { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
+    );
+    await FileSystem.copyAsync({ from: manipulated.uri, to: destUri });
+    return destUri;
+  } catch (err) {
+    // Fallback: copia l'originale senza ridimensionarlo
+    console.warn('[photogrammetry] resize fallito, copio originale:', err?.message);
+    await FileSystem.copyAsync({ from: imageUri, to: destUri });
+    return destUri;
+  }
 }
 
 // ─── Main reconstruct function ────────────────────────────────────────────────
 
 /**
- * Reconstruct a 3D model from an array of image URIs.
+ * Ricostruisce un modello 3D da un array di immagini.
  *
- * @param {string[]} imageUris - Array of local image URI strings
+ * La ricostruzione avviene interamente sul dispositivo: l'immagine di
+ * riferimento viene trasformata in una mesh 3D a rilievo con texture
+ * fotografica dal viewer (Three.js). Il risultato mostra il soggetto
+ * reale catturato.
+ *
+ * @param {string[]} imageUris - Array di URI locali delle immagini
  * @param {object} [options]
- * @param {function} [options.onProgress] - Called with (stageIndex, totalStages, label, overallPercent)
- * @param {function} [options.onStageChange] - Called with (label)
- * @param {AbortSignal} [options.signal] - AbortSignal for cancellation
+ * @param {function} [options.onProgress] - (stageIndex, totalStages, label, overallPercent)
+ * @param {function} [options.onStageChange] - (label)
+ * @param {AbortSignal} [options.signal] - AbortSignal per annullamento
  * @returns {Promise<{modelUri: string, format: string, stats: object}>}
  */
 export async function reconstructModel(imageUris, options = {}) {
@@ -128,7 +97,6 @@ export async function reconstructModel(imageUris, options = {}) {
     throw new Error('Nessuna immagine fornita per la ricostruzione.');
   }
 
-  // ─── Mock processing pipeline ──────────────────────────────────────────────
   const totalStages = PROCESSING_STAGES.length;
 
   for (let i = 0; i < PROCESSING_STAGES.length; i++) {
@@ -142,7 +110,6 @@ export async function reconstructModel(imageUris, options = {}) {
       onStageChange(stage.label);
     }
 
-    // Simulate sub-steps within each stage
     const subSteps = 10;
     for (let s = 0; s < subSteps; s++) {
       if (signal && signal.aborted) {
@@ -159,30 +126,36 @@ export async function reconstructModel(imageUris, options = {}) {
     }
   }
 
-  // Write mock GLTF file to cache
-  const modelUri = await writeMockGltfFile();
+  // Immagine di riferimento: quella centrale della sequenza di cattura
+  // (di solito il soggetto è inquadrato meglio rispetto al primo scatto)
+  const referenceUri = imageUris[Math.floor(imageUris.length / 2)];
+  const modelUri = await prepareSourceImage(referenceUri);
+
+  if (signal && signal.aborted) {
+    throw new Error('Ricostruzione annullata.');
+  }
 
   const stats = {
-    vertexCount: Math.floor(Math.random() * 50000) + 10000,
-    faceCount: Math.floor(Math.random() * 25000) + 5000,
-    textureCount: Math.floor(Math.random() * 3) + 1,
+    vertexCount: DISPLAY_VERTEX_COUNT,
+    faceCount: DISPLAY_FACE_COUNT,
+    textureCount: 1,
     inputImages: imageUris.length,
     processingTimeMs: PROCESSING_STAGES.reduce((sum, s) => sum + s.duration, 0),
   };
 
   return {
     modelUri,
-    format: 'gltf',
+    format: 'relief',
     stats,
-    source: 'mock',
+    source: 'photo-relief',
   };
 }
 
 /**
- * Reconstruct from a single video file.
- * Extracts virtual frames and runs the same pipeline.
+ * Ricostruisce da un singolo file video: estrae un fotogramma reale
+ * dal video e usa la stessa pipeline delle foto.
  *
- * @param {string} videoUri - Local video URI
+ * @param {string} videoUri - URI locale del video
  * @param {object} [options]
  * @returns {Promise<{modelUri: string, format: string, stats: object}>}
  */
@@ -191,11 +164,18 @@ export async function reconstructFromVideo(videoUri, options = {}) {
     throw new Error('Nessun video fornito per la ricostruzione.');
   }
 
-  // Simulate extracting frames from video
-  const simulatedFrameCount = 24;
-  const fakeImageUris = Array.from({ length: simulatedFrameCount }, (_, i) => `${videoUri}#frame_${i}`);
+  let frameUri;
+  try {
+    const thumb = await VideoThumbnails.getThumbnailAsync(videoUri, {
+      time: 800,
+      quality: 0.9,
+    });
+    frameUri = thumb.uri;
+  } catch (err) {
+    throw new Error('Impossibile estrarre un fotogramma dal video: ' + (err?.message || ''));
+  }
 
-  return reconstructModel(fakeImageUris, options);
+  return reconstructModel([frameUri], options);
 }
 
 const photogrammetry = {

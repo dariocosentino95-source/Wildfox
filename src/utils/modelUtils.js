@@ -121,8 +121,18 @@ export function getFormatBadgeColor(format) {
     stl: '#F59E0B',
     fbx: '#8B5CF6',
     ply: '#EF4444',
+    relief: '#8B5CF6',
   };
   return colors[(format || '').toLowerCase()] || '#6B6B8A';
+}
+
+/**
+ * Etichetta leggibile per il badge formato.
+ * 'relief' è il formato interno della ricostruzione fotografica.
+ */
+export function getFormatLabel(format) {
+  if ((format || '').toLowerCase() === 'relief') return '3D';
+  return (format || 'GLTF').toUpperCase();
 }
 
 // ─── Stats formatting ─────────────────────────────────────────────────────────
@@ -148,6 +158,7 @@ const modelUtils = {
   getFormatMimeType,
   formatDate,
   getFormatBadgeColor,
+  getFormatLabel,
   formatModelStats,
 };
 

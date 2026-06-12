@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import colors from '../theme/colors';
 import { getAllProjects } from '../services/storage';
-import { getModelThumbnail, formatDate, getFormatBadgeColor } from '../utils/modelUtils';
+import { getModelThumbnail, formatDate, getFormatBadgeColor, getFormatLabel } from '../utils/modelUtils';
 import { generateId } from '../utils/modelUtils';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -57,7 +57,7 @@ const ProjectCard = memo(function ProjectCard({ project, onPress }) {
         {/* Format badge */}
         <View style={[styles.formatBadge, { backgroundColor: badgeColor + '22', borderColor: badgeColor + '66' }]}>
           <Text style={[styles.formatBadgeText, { color: badgeColor }]}>
-            {(project.format || 'GLTF').toUpperCase()}
+            {getFormatLabel(project.format)}
           </Text>
         </View>
       </View>

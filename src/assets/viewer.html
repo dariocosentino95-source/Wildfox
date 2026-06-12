@@ -410,6 +410,219 @@
         }
       }
 
+      // ── Photo relief reconstruction ───────────────────────────────────────
+      // Builds a 3D relief mesh from the captured photo: the image is sampled
+      // into a height field (luminance -> depth, smoothed, center-weighted)
+      // and used to displace a textured grid. Front + mirrored back give the
+      // model volume. This is the on-device "reconstruction" of the subject.
+
+      function sampleImage(img, S) {
+        var cnv = document.createElement('canvas');
+        cnv.width = S;
+        cnv.height = S;
+        var ctx = cnv.getContext('2d');
+        ctx.drawImage(img, 0, 0, S, S);
+        var data = ctx.getImageData(0, 0, S, S).data;
+        var heights = new Float32Array(S * S);
+        var colors = new Uint8Array(S * S * 3);
+        for (var i = 0; i < S * S; i++) {
+          var r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+          heights[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+          colors[i * 3] = r;
+          colors[i * 3 + 1] = g;
+          colors[i * 3 + 2] = b;
+        }
+        return { heights: heights, colors: colors, size: S };
+      }
+
+      function boxBlur(src, S) {
+        var out = new Float32Array(S * S);
+        for (var y = 0; y < S; y++) {
+          for (var x = 0; x < S; x++) {
+            var sum = 0, cnt = 0;
+            for (var dy = -1; dy <= 1; dy++) {
+              for (var dx = -1; dx <= 1; dx++) {
+                var nx = x + dx, ny = y + dy;
+                if (nx >= 0 && nx < S && ny >= 0 && ny < S) {
+                  sum += src[ny * S + nx];
+                  cnt++;
+                }
+              }
+            }
+            out[y * S + x] = sum / cnt;
+          }
+        }
+        return out;
+      }
+
+      function reliefDepth(heights, S, ix, iy, depthScale) {
+        var h = heights[iy * S + ix];
+        // Center-weighted falloff: il soggetto (centro foto) emerge,
+        // i bordi (sfondo) restano piatti
+        var nx = (ix / (S - 1)) * 2 - 1;
+        var ny = (iy / (S - 1)) * 2 - 1;
+        var falloff = Math.max(0, 1 - (nx * nx + ny * ny) * 0.6);
+        var isEdge = ix === 0 || iy === 0 || ix === S - 1 || iy === S - 1;
+        if (isEdge) return 0;
+        return (0.12 + h * depthScale) * falloff;
+      }
+
+      function buildReliefGeometry(field, gridN, width, height, depthScale) {
+        var S = field.size; // S === gridN + 1
+        var geo = new THREE.PlaneGeometry(width, height, gridN, gridN);
+        var pos = geo.attributes.position;
+        for (var vi = 0; vi < pos.count; vi++) {
+          var ix = vi % S;
+          var iy = Math.floor(vi / S);
+          pos.setZ(vi, reliefDepth(field.heights, S, ix, iy, depthScale));
+        }
+        geo.computeVertexNormals();
+        return geo;
+      }
+
+      function buildRelief(img) {
+        var gridN = 96;
+        var S = gridN + 1;
+        var field = sampleImage(img, S);
+        field.heights = boxBlur(boxBlur(field.heights, S), S);
+
+        var aspect = img.height / img.width;
+        if (!isFinite(aspect) || aspect <= 0) aspect = 1;
+        aspect = Math.max(0.5, Math.min(1.8, aspect));
+        var width = 2;
+        var height = 2 * aspect;
+        var depthScale = 0.4;
+
+        var geo = buildReliefGeometry(field, gridN, width, height, depthScale);
+
+        var tex = new THREE.Texture(img);
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.encoding = THREE.sRGBEncoding;
+        tex.needsUpdate = true;
+
+        var mat = new THREE.MeshStandardMaterial({
+          map: tex,
+          roughness: 0.85,
+          metalness: 0.0,
+          side: THREE.DoubleSide,
+        });
+
+        var front = new THREE.Mesh(geo, mat);
+        front.castShadow = true;
+        front.receiveShadow = true;
+        var back = new THREE.Mesh(geo, mat);
+        back.rotation.y = Math.PI;
+        back.castShadow = true;
+
+        var group = new THREE.Group();
+        group.add(front);
+        group.add(back);
+
+        clearScene();
+        state.model = group;
+        scene.add(group);
+        placeholderGroup.visible = false;
+        fitCameraToObject(group);
+
+        var vertexCount = 2 * S * S;
+        var faceCount = 2 * gridN * gridN * 2;
+        showStatus('Modello 3D generato', 2000);
+        postToRN({
+          type: 'modelLoaded',
+          format: 'relief',
+          vertexCount: vertexCount,
+          faceCount: faceCount,
+        });
+
+        // Mesh a risoluzione ridotta per l'esportazione (inviata a RN)
+        sendExportMesh(img, width, height, depthScale);
+      }
+
+      function sendExportMesh(img, width, height, depthScale) {
+        try {
+          var gridM = 48;
+          var S = gridM + 1;
+          var field = sampleImage(img, S);
+          field.heights = boxBlur(field.heights, S);
+
+          var positions = [];
+          var uvs = [];
+          var colors = [];
+          var indices = [];
+
+          // Fronte (z+) e retro speculare (z-), bordi a z=0 cosicché
+          // le due metà combacino lungo il perimetro
+          for (var side = 0; side < 2; side++) {
+            var sign = side === 0 ? 1 : -1;
+            var base = side * S * S;
+            for (var iy = 0; iy < S; iy++) {
+              for (var ix = 0; ix < S; ix++) {
+                var x = (ix / gridM - 0.5) * width;
+                var y = (0.5 - iy / gridM) * height;
+                var z = sign * reliefDepth(field.heights, S, ix, iy, depthScale);
+                positions.push(
+                  Math.round(x * 10000) / 10000,
+                  Math.round(y * 10000) / 10000,
+                  Math.round(z * 10000) / 10000
+                );
+                uvs.push(
+                  Math.round((ix / gridM) * 10000) / 10000,
+                  Math.round((1 - iy / gridM) * 10000) / 10000
+                );
+                var ci = (iy * S + ix) * 3;
+                colors.push(field.colors[ci], field.colors[ci + 1], field.colors[ci + 2]);
+              }
+            }
+            for (var fy = 0; fy < gridM; fy++) {
+              for (var fx = 0; fx < gridM; fx++) {
+                var a = base + fy * S + fx;
+                var b = base + fy * S + fx + 1;
+                var c = base + (fy + 1) * S + fx;
+                var d = base + (fy + 1) * S + fx + 1;
+                if (side === 0) {
+                  indices.push(a, c, b, b, c, d);
+                } else {
+                  indices.push(a, b, c, b, d, c);
+                }
+              }
+            }
+          }
+
+          postToRN({
+            type: 'meshData',
+            positions: positions,
+            uvs: uvs,
+            colors: colors,
+            indices: indices,
+            vertexCount: positions.length / 3,
+            faceCount: indices.length / 3,
+          });
+        } catch (e) {
+          // L'esportazione userà il fallback; la visualizzazione non è compromessa
+          postToRN({ type: 'error', message: 'meshData: ' + e.message });
+        }
+      }
+
+      function loadRelief(base64, mime) {
+        showStatus('Generazione modello 3D...');
+        var img = new Image();
+        img.onload = function () {
+          try {
+            buildRelief(img);
+          } catch (e) {
+            showStatus('Errore generazione: ' + e.message, 4000);
+            postToRN({ type: 'modelError', error: e.message });
+          }
+        };
+        img.onerror = function () {
+          postToRN({ type: 'modelError', error: 'Immagine sorgente non valida' });
+        };
+        img.src = 'data:' + (mime || 'image/jpeg') + ';base64,' + base64;
+      }
+
       // ── Selection ─────────────────────────────────────────────────────────
       function clearSelectionHighlight() {
         if (state.highlightMesh) {
@@ -637,6 +850,11 @@
 
             case 'loadModel':
               loadModel(msg.uri, msg.format);
+              break;
+
+            case 'loadRelief':
+              // Ricostruzione 3D dalla foto catturata (inviata come base64)
+              loadRelief(msg.image, msg.mime);
               break;
 
             case 'loadModelContent':

@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 import colors from '../theme/colors';
 import {
   getAllProjects,
@@ -29,6 +30,7 @@ import {
   formatDate,
   formatFileSize,
   getFormatBadgeColor,
+  getFormatLabel,
   formatModelStats,
 } from '../utils/modelUtils';
 
@@ -59,7 +61,7 @@ const ProjectCard = memo(function ProjectCard({ project, onPress, onLongPress })
         {/* Format badge */}
         <View style={[styles.formatBadge, { backgroundColor: badgeColor + '22', borderColor: badgeColor + '66' }]}>
           <Text style={[styles.formatBadgeText, { color: badgeColor }]}>
-            {(project.format || 'GLTF').toUpperCase()}
+            {getFormatLabel(project.format)}
           </Text>
         </View>
       </View>
@@ -260,9 +262,25 @@ export default function ProjectsScreen() {
     }
   };
 
+  const readMeshData = async (project) => {
+    if (!project?.meshUri) return null;
+    try {
+      return JSON.parse(await FileSystem.readAsStringAsync(project.meshUri));
+    } catch {
+      return null;
+    }
+  };
+
   const handleExport = async (project) => {
     try {
-      const result = await exportAs(project.modelUri, project.format || 'gltf');
+      // 'relief' è il formato interno: il file esportato è un GLTF della mesh reale
+      const exportFormat =
+        !project.format || project.format === 'relief' ? 'gltf' : project.format;
+      const meshData = await readMeshData(project);
+      const result = await exportAs(project.modelUri, exportFormat, {
+        meshData,
+        name: project.name,
+      });
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(result.uri, {
@@ -278,10 +296,15 @@ export default function ProjectsScreen() {
   const handleShare = async (project) => {
     if (!project.modelUri) return;
     try {
+      const meshData = await readMeshData(project);
+      const result = await exportAs(project.modelUri, 'gltf', {
+        meshData,
+        name: project.name,
+      });
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
-        await Sharing.shareAsync(project.modelUri, {
-          mimeType: 'model/gltf+json',
+        await Sharing.shareAsync(result.uri, {
+          mimeType: result.mimeType,
           dialogTitle: `Condividi ${project.name}`,
         });
       }

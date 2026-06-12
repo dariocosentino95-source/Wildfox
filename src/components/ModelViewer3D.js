@@ -61,6 +61,7 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
     onAnnotationPlaced,
     onViewerReady,
     onModelLoaded,
+    onMeshData,
     onError,
     style,
   } = props;
@@ -100,6 +101,20 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
     const isLocal = uri.startsWith('file://') || uri.startsWith('/');
     const isBinary = fmtLower === 'stl' || fmtLower === 'glb';
 
+    // Formato 'relief': l'URI è la foto catturata; il viewer la trasforma
+    // in una mesh 3D a rilievo con texture fotografica.
+    if (fmtLower === 'relief') {
+      FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 })
+        .then((b64) => {
+          const mime = /\.png$/i.test(uri) ? 'image/png' : 'image/jpeg';
+          sendCommand({ type: 'loadRelief', image: b64, mime });
+        })
+        .catch(() => {
+          if (onError) onError({ message: 'Immagine sorgente non leggibile' });
+        });
+      return;
+    }
+
     if (isLocal && (fmtLower === 'gltf' || fmtLower === 'obj' || isBinary)) {
       FileSystem.readAsStringAsync(
         uri,
@@ -119,7 +134,7 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
     } else {
       sendCommand({ type: 'loadModel', uri, format: fmtLower });
     }
-  }, [sendCommand, format]);
+  }, [sendCommand, format, onError]);
 
   // ── Expose methods via ref ────────────────────────────────────────────────
   useImperativeHandle(
@@ -194,7 +209,26 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
             break;
 
           case 'modelLoaded':
-            if (onModelLoaded) onModelLoaded({ format: msg.format });
+            if (onModelLoaded) {
+              onModelLoaded({
+                format: msg.format,
+                vertexCount: msg.vertexCount,
+                faceCount: msg.faceCount,
+              });
+            }
+            break;
+
+          case 'meshData':
+            if (onMeshData) {
+              onMeshData({
+                positions: msg.positions,
+                uvs: msg.uvs,
+                colors: msg.colors,
+                indices: msg.indices,
+                vertexCount: msg.vertexCount,
+                faceCount: msg.faceCount,
+              });
+            }
             break;
 
           case 'modelError':
@@ -243,7 +277,7 @@ const ModelViewer3D = forwardRef(function ModelViewer3D(props, ref) {
         // Ignore parse errors
       }
     },
-    [onViewerReady, onModelLoaded, onAreaSelected, onAnnotationPlaced, onError, modelUri, format, mode, sendCommand, sendLoadModel],
+    [onViewerReady, onModelLoaded, onMeshData, onAreaSelected, onAnnotationPlaced, onError, modelUri, format, mode, sendCommand, sendLoadModel],
   );
 
   // ── WebView error ─────────────────────────────────────────────────────────

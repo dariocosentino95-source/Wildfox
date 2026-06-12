@@ -10,12 +10,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 import colors from '../theme/colors';
 import ModelViewer3D from '../components/ModelViewer3D';
 import AreaSelector from '../components/AreaSelector';
 import NotesPanel from '../components/NotesPanel';
 import ExportModal from '../components/ExportModal';
-import { addNoteToProject, deleteNoteFromProject, getProjectById } from '../services/storage';
+import { addNoteToProject, deleteNoteFromProject, getProjectById, updateProject } from '../services/storage';
 import { exportAs } from '../services/modelExporter';
 
 // ─── ViewerScreen ─────────────────────────────────────────────────────────────
@@ -102,11 +103,50 @@ export default function ViewerScreen() {
     [project],
   );
 
+  // ── Mesh data dal viewer (geometria reale per l'esportazione) ─────────────
+  const handleMeshData = useCallback(
+    async (mesh) => {
+      if (!project?.id || !mesh?.positions?.length) return;
+      try {
+        const dir = FileSystem.documentDirectory + 'wildfox3d/meshes/';
+        const dirInfo = await FileSystem.getInfoAsync(dir);
+        if (!dirInfo.exists) {
+          await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+        }
+        const meshUri = dir + `${project.id}.json`;
+        await FileSystem.writeAsStringAsync(
+          meshUri,
+          JSON.stringify({
+            positions: mesh.positions,
+            uvs: mesh.uvs,
+            colors: mesh.colors,
+            indices: mesh.indices,
+          }),
+        );
+        await updateProject(project.id, { meshUri });
+        setProject((p) => (p ? { ...p, meshUri } : p));
+      } catch {
+        // L'export userà il fallback se la mesh non è salvata
+      }
+    },
+    [project?.id],
+  );
+
   // ── Export ─────────────────────────────────────────────────────────────────
   const handleExport = useCallback(
     async (format) => {
       if (!project?.modelUri) throw new Error('Nessun modello da esportare');
-      const result = await exportAs(project.modelUri, format);
+
+      let meshData = null;
+      if (project.meshUri) {
+        try {
+          meshData = JSON.parse(await FileSystem.readAsStringAsync(project.meshUri));
+        } catch {
+          meshData = null;
+        }
+      }
+
+      const result = await exportAs(project.modelUri, format, { meshData, name: project.name });
 
       // Share the file
       const canShare = await Sharing.isAvailableAsync();
@@ -126,19 +166,12 @@ export default function ViewerScreen() {
   const handleShare = useCallback(async () => {
     if (!project?.modelUri) return;
     try {
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(project.modelUri, {
-          mimeType: 'model/gltf+json',
-          dialogTitle: `Condividi ${project.name}`,
-        });
-      } else {
-        Alert.alert('Condivisione non disponibile', 'La condivisione non è supportata su questo dispositivo.');
-      }
+      // Esporta il modello reale in GLTF e lo condivide
+      await handleExport('gltf');
     } catch (err) {
       Alert.alert('Errore', 'Impossibile condividere il modello.');
     }
-  }, [project]);
+  }, [project, handleExport]);
 
   // ── Brightness slider ──────────────────────────────────────────────────────
   const handleBrightnessChange = useCallback((val) => {
@@ -173,10 +206,16 @@ export default function ViewerScreen() {
         mode={viewMode}
         onAreaSelected={handleAreaSelected}
         onAnnotationPlaced={handleAnnotationPlaced}
-        onModelLoaded={() => {
+        onModelLoaded={({ vertexCount, faceCount }) => {
           setIsModelLoaded(true);
           setViewerError(null);
+          if (vertexCount > 0 && project?.id) {
+            const stats = { ...(project.stats || {}), vertexCount, faceCount };
+            setProject((p) => (p ? { ...p, stats } : p));
+            updateProject(project.id, { stats });
+          }
         }}
+        onMeshData={handleMeshData}
         onError={({ message }) => setViewerError(message || 'Errore caricamento modello')}
         style={StyleSheet.absoluteFill}
       />
