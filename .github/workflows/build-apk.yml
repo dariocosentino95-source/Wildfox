@@ -48,7 +48,7 @@ jobs:
       - name: Patch expo-modules-core for AGP 8.x compatibility
         run: python3 scripts/patch-expo-modules.py
 
-      - name: Bundle Three.js into viewer.html (offline support)
+      - name: Generate embedded viewer (Three.js inlined, offline support)
         run: python3 scripts/bundle-threejs.py
 
       - name: Generate native Android project (expo prebuild)

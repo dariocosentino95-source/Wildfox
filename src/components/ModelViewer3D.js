@@ -16,10 +16,15 @@ import {
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system';
 import colors from '../theme/colors';
+import viewerHtml from '../assets/viewerHtml';
 
-// Load the viewer HTML as a static asset.
-// The HTML file lives at src/assets/viewer.html.
-const viewerHtmlSource = require('../assets/viewer.html');
+// The viewer HTML (with Three.js inlined) is embedded as a JS string and
+// loaded via source={{ html }}. Loading it as a bundled asset/URL is
+// unreliable in Android release builds (resolveAssetSource can produce an
+// http:// dev-server URL → net::ERR_CLEARTEXT_NOT_PERMITTED).
+// The baseUrl is a dummy https origin: nothing is ever fetched from it,
+// it just gives the document a secure origin so blob: URLs work.
+const viewerHtmlSource = { html: viewerHtml, baseUrl: 'https://wildfox3d.local/' };
 
 // ─── ModelViewer3D ─────────────────────────────────────────────────────────────
 
