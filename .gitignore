@@ -5,10 +5,13 @@ __pycache__/
 .venv/
 venv/
 
-# Dati locali (database, log, CSV di lavoro): non vanno versionati
-data/*.db
-data/*.log
-data/*.csv
+# Dati locali e documenti aziendali: MAI versionati (la cartella si ricrea da sola)
+data/
+
+# Documenti che possono contenere dati aziendali, ovunque si trovino
+*.pdf
+*.xlsx
+*.xls
 
 # Output generati
 *_aggiornato_*.csv
