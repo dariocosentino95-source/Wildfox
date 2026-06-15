@@ -1,0 +1,20 @@
+# Cache e bytecode Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Dati locali (database, log, CSV di lavoro): non vanno versionati
+data/*.db
+data/*.log
+data/*.csv
+
+# Output generati
+*_aggiornato_*.csv
+non_trovati_*.csv
+confronto_prezzi_*.csv
+
+# File di sistema
+Thumbs.db
+.DS_Store

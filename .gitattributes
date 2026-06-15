@@ -1,0 +1,4 @@
+# Normalizza i fine-riga: evita modifiche "fantasma" passando tra PC diversi
+* text=auto eol=lf
+# Gli script .bat devono restare CRLF per Windows
+*.bat text eol=crlf
