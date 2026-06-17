@@ -44,6 +44,27 @@ Ricerca full-text su codice o descrizione.
 Mostra tutti i fornitori dell'articolo con i rispettivi prezzi.
 Include storico completo delle variazioni di prezzo.
 
+### 🧾 Documenti Fornitore
+Aggiorna **codici, prezzi e giacenze in un colpo solo** da una fattura o conferma
+d'ordine del fornitore (PDF). Flusso:
+
+1. **Sfoglia PDF** + **Analizza** → l'app riconosce il fornitore (es. Cardinale),
+   estrae per ogni riga **codice + quantità + prezzo netto** (gestisce lo sconto, es. `60+14`).
+2. Abbina ogni codice all'articolo Mexal cercando il **codice fornitore in qualunque
+   slot 1..9** (non deve stare nella stessa colonna). L'anteprima mostra 3 stati:
+   - **già collegato** → aggiorna prezzo e quantità
+   - **auto-collega** → il codice è già un articolo Mexal, lo collega da solo
+   - **NUOVO** → non riconosciuto: lo colleghi tu (collegamento guidato)
+3. Per i NUOVI: **Precompila codici nuovi** e scrivi accanto il codice Mexal
+   (`CODICE_DOC = CODICE_MEXAL`).
+4. **✅ Applica**: aggiorna nel database il codice fornitore (`_ARCOF`, se mancante),
+   il prezzo (`_ARFPR` + regola prezzo base) e, se spuntato, la **giacenza** in `anpr`
+   (`nuova = max(esistenza, 0) + quantità`).
+5. Genera l'`anar` aggiornato da **📥 Importa / Esporta Mexal** e reimporta in Mexal.
+
+> Funziona oggi con **Cardinale**. Spolzino, IdroFerrara e Bonardi si aggiungono
+> appena disponibili i loro documenti di esempio.
+
 ### 💾 Upload Listino
 Carica un listino aggiornato dal fornitore (CSV o PDF) e applica le regole:
 
@@ -133,6 +154,7 @@ Configura l'aggiornamento settimanale automatico:
 idu_price_manager/
 ├── main.py            — interfaccia desktop (Tkinter)
 ├── db.py              — database SQLite, import CSV Mexal, query
+├── documents.py       — elaborazione fatture/DDT fornitore (codici+prezzi+giacenze)
 ├── price_engine.py    — regole prezzi, upload listini CSV/PDF, ordine PDF
 ├── scraper.py         — scraping portali fornitori (Playwright/requests)
 ├── scheduler.py       — aggiornamento settimanale automatico

@@ -33,6 +33,7 @@ import scraper
 import scheduler
 import export_mexal
 import stock_engine
+import documents
 
 
 # ── rilevamento file Mexal (Opzione "collega a Mexal") ─────────────────────────
@@ -103,8 +104,11 @@ class IDUApp(tk.Tk):
                       f"📁 File Mexal rilevato automaticamente:\n   {anar}\n"
                       "   Premi ▶ Importa per caricarlo (o cambia percorso).")
         anpr = _detect_mexal_file("anpr")
-        if anpr and hasattr(self, 'mag_anpr_var') and not self.mag_anpr_var.get():
-            self.mag_anpr_var.set(anpr)
+        if anpr:
+            if hasattr(self, 'mag_anpr_var') and not self.mag_anpr_var.get():
+                self.mag_anpr_var.set(anpr)
+            if hasattr(self, 'doc_anpr_var') and not self.doc_anpr_var.get():
+                self.doc_anpr_var.set(anpr)
 
     # ── UI principale ─────────────────────────────────────────────────────────
 
@@ -123,6 +127,7 @@ class IDUApp(tk.Tk):
 
         self.tab_import    = tk.Frame(self.nb, bg=BG2)
         self.tab_articles  = tk.Frame(self.nb, bg=BG2)
+        self.tab_documenti = tk.Frame(self.nb, bg=BG2)
         self.tab_upload    = tk.Frame(self.nb, bg=BG2)
         self.tab_magazzino = tk.Frame(self.nb, bg=BG2)
         self.tab_pdf_order = tk.Frame(self.nb, bg=BG2)
@@ -134,6 +139,7 @@ class IDUApp(tk.Tk):
 
         self.nb.add(self.tab_import,    text="  📥 Importa / Esporta Mexal  ")
         self.nb.add(self.tab_articles,  text="  🔍 Articoli  ")
+        self.nb.add(self.tab_documenti, text="  🧾 Documenti Fornitore  ")
         self.nb.add(self.tab_upload,    text="  💾 Upload Listino  ")
         self.nb.add(self.tab_magazzino, text="  📦 Carico Magazzino  ")
         self.nb.add(self.tab_pdf_order, text="  📄 Ordine PDF  ")
@@ -145,6 +151,7 @@ class IDUApp(tk.Tk):
 
         self._build_tab_import()
         self._build_tab_articles()
+        self._build_tab_documenti()
         self._build_tab_upload()
         self._build_tab_magazzino()
         self._build_tab_pdf_order()
@@ -537,6 +544,232 @@ class IDUApp(tk.Tk):
                 f"{r['valore_nuovo']:.4f}" if r['valore_nuovo'] else '—',
                 r['motivo']
             ))
+
+    # ── TAB: Documenti Fornitore ──────────────────────────────────────────────
+
+    def _build_tab_documenti(self):
+        f = self.tab_documenti
+        _section(f, "🧾 Documenti fornitore — aggiorna codici, prezzi e giacenze da fattura/DDT")
+        tk.Label(f, text=(
+            "Carica una fattura o conferma d'ordine (PDF): l'app riconosce il fornitore, "
+            "estrae codici/quantità/prezzi e li abbina agli articoli Mexal (anche se il "
+            "codice fornitore è in slot diversi).\nI codici NUOVI li colleghi tu nell'area "
+            "in basso. Niente viene scritto finché non premi ✅ Applica."
+        ), font=FONT_S, bg=BG2, fg=FG2, justify='left').pack(padx=20, pady=2, anchor='w')
+
+        row1 = tk.Frame(f, bg=BG2); row1.pack(fill='x', padx=20, pady=6)
+        self.doc_file_var = tk.StringVar(value="Nessun file")
+        tk.Label(row1, textvariable=self.doc_file_var, font=FONT_S, bg=BG2, fg=FG2,
+                 width=42, anchor='w').pack(side='left')
+        _btn(row1, "📂 Sfoglia PDF…", self._browse_doc).pack(side='left', padx=4)
+        _btn(row1, "🔍 Analizza", self._run_doc_analyze, color=ACCENT).pack(side='left', padx=4)
+
+        row2 = tk.Frame(f, bg=BG2); row2.pack(fill='x', padx=20, pady=2)
+        tk.Label(row2, text="Fornitore:", font=FONT_S, bg=BG2, fg=FG).pack(side='left')
+        self.doc_forn_var = tk.StringVar()
+        self.doc_forn_cb = ttk.Combobox(row2, textvariable=self.doc_forn_var,
+                                        state='readonly', width=32)
+        self.doc_forn_cb.pack(side='left', padx=6)
+        tk.Label(row2, text="(rilevato dal PDF; correggi se serve)",
+                 font=FONT_S, bg=BG2, fg=FG2).pack(side='left', padx=6)
+
+        cols = ('codice', 'mexal', 'descrizione', 'qta', 'netto', 'stato')
+        self.doc_tree = _tree(
+            f, cols,
+            headings=('Cod. doc.', 'Cod. Mexal', 'Descrizione', 'Q.tà',
+                      'Prezzo netto', 'Stato'),
+            widths=(110, 110, 250, 55, 90, 130), height=9)
+        self.doc_tree.tag_configure('nuovo', foreground=WARN)
+        self.doc_tree.tag_configure('ok', foreground=ACCENT2)
+
+        lf = tk.LabelFrame(
+            f, text=" Collegamento guidato codici NUOVI  (una riga:  CODICE_DOC = CODICE_MEXAL) ",
+            bg=BG2, fg=FG2, font=FONT_S)
+        lf.pack(fill='x', padx=20, pady=4)
+        self.doc_links_txt = tk.Text(lf, height=3, font=('Consolas', 9), bg=CARD,
+                                     fg=FG, insertbackground=FG)
+        self.doc_links_txt.pack(fill='x', padx=6, pady=4)
+        _btn(lf, "↧ Precompila codici nuovi", self._doc_fill_links_template,
+             color='#3a3f5c').pack(anchor='w', padx=6, pady=(0, 4))
+
+        row3 = tk.Frame(f, bg=BG2); row3.pack(fill='x', padx=20, pady=4)
+        self.doc_giacenze_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(row3, text="Carica anche le giacenze (anpr)",
+                       variable=self.doc_giacenze_var, font=FONT_S, bg=BG2, fg=FG,
+                       selectcolor=CARD, activebackground=BG2,
+                       activeforeground=FG).pack(side='left')
+        tk.Label(row3, text="anpr:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(12, 2))
+        self.doc_anpr_var = tk.StringVar()
+        tk.Entry(row3, textvariable=self.doc_anpr_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=32).pack(side='left', padx=4)
+        _btn(row3, "📂", self._browse_doc_anpr).pack(side='left')
+
+        _btn(f, "✅ Applica (codici + prezzi + giacenze)",
+             self._run_doc_apply, color=ACCENT2).pack(anchor='w', padx=20, pady=6)
+        self.doc_log = _log_box(f, height=6)
+        self._doc_refresh_forn_combo()
+
+    def _doc_refresh_forn_combo(self):
+        rows = db.get_all_suppliers()
+        self._doc_forn_map = {f"{r['codice_mexal']} — {r['nome'] or 'N/D'}": r['id']
+                              for r in rows}
+        self.doc_forn_cb['values'] = list(self._doc_forn_map.keys())
+
+    def _browse_doc(self):
+        p = filedialog.askopenfilename(
+            title="Documento fornitore (PDF)",
+            initialdir=os.path.join(os.path.expanduser('~'), 'Downloads'),
+            filetypes=[("PDF", "*.pdf"), ("Tutti", "*.*")])
+        if p:
+            self.doc_file_var.set(p)
+            self._doc_path = p
+
+    def _browse_doc_anpr(self):
+        p = filedialog.askopenfilename(
+            title="File anpr Mexal", initialdir=r"C:\mexal\dati\datiaz",
+            filetypes=[("CSV", "*.csv"), ("Tutti", "*.*")])
+        if p:
+            self.doc_anpr_var.set(p)
+
+    def _run_doc_analyze(self):
+        path = getattr(self, '_doc_path', '')
+        if not path or not os.path.exists(path):
+            messagebox.showerror("Errore", "Seleziona un PDF.")
+            return
+        manual_fid = getattr(self, '_doc_forn_map', {}).get(self.doc_forn_var.get())
+        self.doc_log.delete('1.0', 'end')
+        self.doc_tree.delete(*self.doc_tree.get_children())
+        self._log(self.doc_log, "Analisi documento…")
+
+        def _task():
+            try:
+                fid, fmt = documents.detect_supplier_id(path)
+                items = documents.parse_items(path)
+                if not items:
+                    self._log(self.doc_log, "Nessuna riga riconosciuta nel documento.")
+                    return
+                use_fid = fid or manual_fid
+                cls = documents.classify(items, use_fid) if use_fid else []
+                self._doc_items = items
+                self._doc_fid = use_fid
+
+                def render():
+                    if use_fid:
+                        for label, i in getattr(self, '_doc_forn_map', {}).items():
+                            if i == use_fid:
+                                self.doc_forn_var.set(label)
+                                break
+                    import collections
+                    cnt = collections.Counter(c['stato'] for c in cls)
+                    self._doc_last_nuovi = [c['codice'] for c in cls if c['stato'] == 'nuovo']
+                    for c in cls:
+                        tag = ('nuovo' if c['stato'] == 'nuovo'
+                               else ('ok' if c['stato'] == 'gia_collegato' else ''))
+                        stato_txt = {'gia_collegato': 'già collegato',
+                                     'auto_collega': 'auto-collega',
+                                     'nuovo': 'NUOVO → collega'}.get(c['stato'], c['stato'])
+                        self.doc_tree.insert(
+                            '', 'end', tags=((tag,) if tag else ()),
+                            values=(c['codice'], c['mexal'] or '—',
+                                    (c['descrizione'] or '—')[:45],
+                                    f"{c['qta']:.0f}" if c['qta'] else '—',
+                                    f"{c['netto']:.4f}" if c['netto'] else '—',
+                                    stato_txt))
+                    if not use_fid:
+                        self._log(self.doc_log,
+                                  "Fornitore non rilevato: scegli dal menu a tendina e ri-analizza.")
+                        return
+                    self._log(self.doc_log,
+                              f"Fornitore: {fmt or '?'} — Righe: {len(items)} | "
+                              f"già collegati: {cnt.get('gia_collegato', 0)}, "
+                              f"auto-collega: {cnt.get('auto_collega', 0)}, "
+                              f"NUOVI da collegare: {cnt.get('nuovo', 0)}")
+                    if cnt.get('nuovo'):
+                        self._log(self.doc_log,
+                                  "→ Per i NUOVI: 'Precompila codici nuovi' e scrivi il "
+                                  "codice Mexal dopo l' '='.")
+
+                self._ui(render)
+            except Exception as e:
+                self._log(self.doc_log, f"❌ Errore: {e}")
+                logger.exception("Doc analyze")
+
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _doc_fill_links_template(self):
+        nuovi = getattr(self, '_doc_last_nuovi', [])
+        if not nuovi:
+            messagebox.showinfo("Info", "Nessun codice nuovo (analizza prima un documento).")
+            return
+        self.doc_links_txt.delete('1.0', 'end')
+        self.doc_links_txt.insert('1.0', "\n".join(f"{c} = " for c in nuovi))
+
+    def _parse_doc_links(self, text):
+        links = {}
+        for line in (text or '').splitlines():
+            if '=' in line:
+                a, b = line.split('=', 1)
+                a, b = a.strip(), b.strip()
+                if a and b:
+                    links[a.upper()] = b
+        return links
+
+    def _run_doc_apply(self):
+        items = getattr(self, '_doc_items', None)
+        if not items:
+            messagebox.showerror("Errore", "Analizza prima un documento.")
+            return
+        fid = (getattr(self, '_doc_forn_map', {}).get(self.doc_forn_var.get())
+               or getattr(self, '_doc_fid', None))
+        if not fid:
+            messagebox.showerror("Errore", "Seleziona il fornitore.")
+            return
+        manual = self._parse_doc_links(self.doc_links_txt.get('1.0', 'end'))
+        carica = self.doc_giacenze_var.get()
+        anpr = self.doc_anpr_var.get().strip()
+        anpr_out = None
+        if carica:
+            if not anpr or not os.path.exists(anpr):
+                messagebox.showerror(
+                    "Errore", "Indica il file anpr per le giacenze (o togli la spunta).")
+                return
+            anpr_out = filedialog.asksaveasfilename(
+                title="Salva anpr aggiornato", defaultextension=".csv",
+                filetypes=[("CSV", "*.csv")],
+                initialfile=f"anpr_idu_aggiornato_{datetime.now().strftime('%Y%m%d')}.csv")
+            if not anpr_out:
+                return
+        if not messagebox.askyesno(
+                "Conferma",
+                "Verranno aggiornati codici e prezzi nel database"
+                + (" e generato l'anpr aggiornato" if carica else "")
+                + ".\nL'anar lo generi poi da '📥 Importa / Esporta Mexal'.\nProcedere?"):
+            return
+        self.doc_log.delete('1.0', 'end')
+
+        def _task():
+            try:
+                rep = documents.apply_document(
+                    items, fid, manual_links=manual, carica_giacenze=carica,
+                    anpr_path=anpr or None, anpr_out=anpr_out,
+                    log_cb=lambda m: self._log(self.doc_log, m))
+                giac = rep.get('giacenze')
+                msg = (f"Aggiornati (già collegati): {len(rep['aggiornati'])}\n"
+                       f"Auto-collegati: {len(rep['creati'])}\n"
+                       f"Collegati manualmente: {len(rep['collegati_manuale'])}\n"
+                       f"Non risolti (ancora da collegare): {len(rep['non_risolti'])}\n")
+                if giac:
+                    msg += f"Giacenze aggiornate: {giac['n_articoli']} articoli\n"
+                    msg += f"anpr salvato in:\n{anpr_out}\n"
+                msg += ("\nORA: '📥 Importa / Esporta Mexal' → 'Genera CSV aggiornato' "
+                        "per l'anar, poi reimporta in Mexal (prima un test).")
+                self._log(self.doc_log, msg)
+                self._ui(lambda m=msg: messagebox.showinfo("Applicato", m))
+            except Exception as e:
+                self._log(self.doc_log, f"❌ Errore: {e}")
+                logger.exception("Doc apply")
+
+        threading.Thread(target=_task, daemon=True).start()
 
     # ── TAB: Upload Listino ───────────────────────────────────────────────────
 
