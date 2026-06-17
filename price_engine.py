@@ -100,6 +100,7 @@ def process_pdf_listino(pdf_path: str, fornitore_id: int,
         result['prezzo_listino'] = prezzo
         result['prezzo_lordo'] = art.get('prezzo_lordo')
         result['sconto'] = art.get('sconto')
+        result['qta'] = art.get('qta')
         results.append(result)
 
     return results
@@ -144,16 +145,19 @@ def _parse_cardinale_pdf(pdf_path: str, progress_cb=None):
             i = 0
             while i < len(lines):
                 line = lines[i].strip()
-                m = re.match(r'^\*([A-Z0-9][A-Z0-9\.\-/]*)\*', line)
+                # marker articolo: *CODICE* QUANTITA  (la quantità può mancare)
+                m = re.match(r'^\*([A-Z0-9][A-Z0-9\.\-/]*)\*(?:\s+([\d.]+,\d+))?', line)
                 if not m:
                     i += 1
                     continue
                 codice = m.group(1)
+                qta = (float(m.group(2).replace('.', '').replace(',', '.'))
+                       if m.group(2) else None)
 
                 prices_in_block = []
                 sconto = None
                 j = i + 1
-                while j < len(lines) and j < i + 9:
+                while j < len(lines) and j < i + 12:
                     l = lines[j].strip()
                     if re.match(r'^\*[A-Z0-9]', l):
                         break
@@ -171,6 +175,7 @@ def _parse_cardinale_pdf(pdf_path: str, progress_cb=None):
 
                 results.append({
                     'codice': codice,
+                    'qta': qta,
                     'prezzo_lordo': prezzo_lordo,
                     'prezzo_netto': prezzo_netto,
                     'sconto': sconto,
@@ -296,6 +301,7 @@ def _apply_for_codice(codice: str, fornitore_id: int,
     ).fetchone()
 
     art_id = None
+    mexal_cod = None
     ambiguo = False
     creato = False
     nota = None
@@ -303,6 +309,7 @@ def _apply_for_codice(codice: str, fornitore_id: int,
     if af:
         # Match sicuro: codice fornitore di questo fornitore
         art_id = af[0]['articolo_id']
+        mexal_cod = af[0]['mexal']
         # Ambiguità informativa: esiste anche un articolo Mexal con questo codice?
         if mexal_any and mexal_any['id'] != art_id:
             ambiguo = True
@@ -312,6 +319,7 @@ def _apply_for_codice(codice: str, fornitore_id: int,
     elif art_link:
         # Il codice Mexal coincide col codice fornitore (caso normale, 611 casi)
         art_id = art_link[0]['articolo_id']
+        mexal_cod = art_link[0]['mexal']
     elif mexal_any:
         # Esiste come Mexal ma NON collegato a questo fornitore.
         if not auto_link:
@@ -324,6 +332,7 @@ def _apply_for_codice(codice: str, fornitore_id: int,
             }
         # Crea automaticamente il collegamento col codice del listino
         art_id = mexal_any['id']
+        mexal_cod = mexal_any['codice']
         creato = True
         nota = (f"'{codice}': creato nuovo collegamento con questo fornitore "
                 f"(il codice esisteva in Mexal ma non era associato)")
@@ -341,6 +350,7 @@ def _apply_for_codice(codice: str, fornitore_id: int,
         return {'stato': 'rel_fornitore_assente', 'art_id': art_id}
     result['stato'] = 'aggiornato'
     result['art_id'] = art_id
+    result['mexal'] = mexal_cod
     if creato:
         result['creato'] = True
         result['nota'] = nota
