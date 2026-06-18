@@ -1,0 +1,11 @@
+{
+  "appId": "it.briscola.segnapunti",
+  "appName": "Briscola",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
