@@ -62,9 +62,15 @@ d'ordine del fornitore (PDF). Flusso:
    (`nuova = max(esistenza, 0) + quantità`).
 5. Genera l'`anar` aggiornato da **📥 Importa / Esporta Mexal** e reimporta in Mexal.
 
-> **Fornitori riconosciuti:** Cardinale (auto-rilevato dal PDF) e Spolzino.
-> **Spolzino** non è rilevabile dal testo del DDT: selezionalo a mano dal menu a
-> tendina *Fornitore* prima di premere Analizza. IdroFerrara e Bonardi si
+> **Fornitori riconosciuti:**
+> - **Cardinale** — auto-rilevato dal PDF.
+> - **Spolzino, Aqualif** — usano lo stesso formato DDT (gestionale "Grafica").
+>   Non sono rilevabili dal testo: selezionali a mano dal menu *Fornitore* prima
+>   di premere Analizza.
+>
+> Un fornitore deve esistere nel database per essere selezionabile. Se è nuovo
+> (non collegato ad alcun articolo nell'anar), aggiungilo dal tab **🏭 Fornitori
+> → Aggiungi nuovo fornitore** (codice Mexal + nome). IdroFerrara e Bonardi si
 > aggiungono quando disponibili i loro documenti di esempio.
 
 ### 💾 Upload Listino
