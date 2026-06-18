@@ -13,10 +13,17 @@ import stock_engine
 
 logger = logging.getLogger(__name__)
 
-# Mappa parola-chiave del documento → codice Mexal del fornitore.
-# (Aggiungere Spolzino / IdroFerrara / Bonardi quando si vedono i loro documenti.)
+# Mappa parola-chiave del documento → codice Mexal del fornitore (auto-rilevamento).
+# (Aggiungere IdroFerrara / Bonardi quando si vedono i loro documenti.)
 FORMATO_FORNITORE = {
     'cardinale': '60100759',
+}
+
+# Mappa codice Mexal fornitore → formato del documento. Usato quando il fornitore
+# non è auto-rilevabile dal testo (es. Spolzino) e lo si sceglie a mano nel menu.
+FORMATO_PER_CODICE = {
+    '60100759': 'cardinale',
+    '60100001': 'spolzino',
 }
 
 
@@ -34,12 +41,25 @@ def detect_supplier_id(pdf_path: str):
     return None, fmt
 
 
+def formato_per_fornitore(fornitore_id):
+    """Ritorna il formato del documento associato a un fornitore (o None)."""
+    if not fornitore_id:
+        return None
+    conn = db.get_connection()
+    r = conn.execute("SELECT codice_mexal FROM fornitori WHERE id=?",
+                     (fornitore_id,)).fetchone()
+    conn.close()
+    return FORMATO_PER_CODICE.get(r['codice_mexal']) if r else None
+
+
 def parse_items(pdf_path: str, formato: str = 'auto'):
     """Estrae le righe del documento: [{codice, qta, prezzo_netto, ...}]."""
     if formato == 'auto':
         formato = price_engine._detect_pdf_format(pdf_path)
     if formato == 'cardinale':
         return price_engine._parse_cardinale_pdf(pdf_path)
+    if formato == 'spolzino':
+        return price_engine._parse_spolzino_pdf(pdf_path)
     return price_engine._parse_generic_pdf(pdf_path)
 
 

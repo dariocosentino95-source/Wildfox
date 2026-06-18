@@ -188,6 +188,50 @@ def _parse_cardinale_pdf(pdf_path: str, progress_cb=None):
     return results
 
 
+def _parse_spolzino_pdf(pdf_path: str, progress_cb=None):
+    """
+    Parser per DDT/fattura Spolzino: UNA riga per articolo, formato
+        CODICE  DESCRIZIONE...  UM  QTA  PREZZO_LORDO  SCONTO...  TOTALE_NETTO_RIGA  [cod]
+    Es: 'IGI462 VASO ... PZ 10 61,000 55,04,00 263,52 1022'
+    Il prezzo fornitore (unitario) = TOTALE_NETTO_RIGA / QTA.
+    """
+    import pdfplumber
+    line_re = re.compile(
+        r'^(?P<cod>[A-Z][A-Z0-9./\-]{1,18})\s+'
+        r'(?P<body>.+?)\s+'
+        r'(?P<netto>\d{1,3}(?:\.\d{3})*,\d{2})(?:\s+\d{1,6})?\s*$')
+    body_re = re.compile(r'\b([A-Z]{1,3})\s+(\d+)\s+(\d+,\d{3})\b(.*)$')
+
+    def _num(s):
+        return float(s.replace('.', '').replace(',', '.'))
+
+    results = []
+    with pdfplumber.open(pdf_path) as pdf:
+        total = len(pdf.pages)
+        for p_idx, page in enumerate(pdf.pages):
+            for line in (page.extract_text() or '').splitlines():
+                m = line_re.match(line.strip())
+                if not m:
+                    continue
+                mb = body_re.search(m.group('body'))
+                if not mb:
+                    continue
+                qta = int(mb.group(2))
+                lordo = _num(mb.group(3))
+                tot_netto = _num(m.group('netto'))
+                unit_netto = round(tot_netto / qta, 4) if qta else None
+                results.append({
+                    'codice': m.group('cod'),
+                    'qta': qta,
+                    'prezzo_lordo': lordo,
+                    'prezzo_netto': unit_netto,   # unitario
+                    'sconto': mb.group(4).strip() or None,
+                })
+            if progress_cb:
+                progress_cb(p_idx + 1, total)
+    return results
+
+
 def _parse_generic_pdf(pdf_path: str, progress_cb=None):
     """Parser generico: un codice + un prezzo per riga."""
     import pdfplumber

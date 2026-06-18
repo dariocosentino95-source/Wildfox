@@ -644,11 +644,15 @@ class IDUApp(tk.Tk):
         def _task():
             try:
                 fid, fmt = documents.detect_supplier_id(path)
-                items = documents.parse_items(path)
-                if not items:
-                    self._log(self.doc_log, "Nessuna riga riconosciuta nel documento.")
-                    return
                 use_fid = fid or manual_fid
+                # formato di lettura: dal fornitore scelto (es. Spolzino) o auto-rilevato
+                fmt_use = documents.formato_per_fornitore(use_fid) or fmt or 'auto'
+                items = documents.parse_items(path, fmt_use)
+                if not items:
+                    self._log(self.doc_log,
+                              "Nessuna riga riconosciuta. Se il fornitore non è stato "
+                              "rilevato, selezionalo dal menu a tendina e ri-analizza.")
+                    return
                 cls = documents.classify(items, use_fid) if use_fid else []
                 self._doc_items = items
                 self._doc_fid = use_fid

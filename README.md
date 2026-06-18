@@ -62,8 +62,10 @@ d'ordine del fornitore (PDF). Flusso:
    (`nuova = max(esistenza, 0) + quantità`).
 5. Genera l'`anar` aggiornato da **📥 Importa / Esporta Mexal** e reimporta in Mexal.
 
-> Funziona oggi con **Cardinale**. Spolzino, IdroFerrara e Bonardi si aggiungono
-> appena disponibili i loro documenti di esempio.
+> **Fornitori riconosciuti:** Cardinale (auto-rilevato dal PDF) e Spolzino.
+> **Spolzino** non è rilevabile dal testo del DDT: selezionalo a mano dal menu a
+> tendina *Fornitore* prima di premere Analizza. IdroFerrara e Bonardi si
+> aggiungono quando disponibili i loro documenti di esempio.
 
 ### 💾 Upload Listino
 Carica un listino aggiornato dal fornitore (CSV o PDF) e applica le regole:
