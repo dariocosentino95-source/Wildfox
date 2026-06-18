@@ -269,12 +269,17 @@ class IDUApp(tk.Tk):
                 "Seleziona il file anar_idu.csv originale (serve per la struttura).")
             return
 
-        # Chiede dove salvare
+        # Chiede dove salvare. Propone la CARTELLA di Mexal e il nome 'anar_idu.csv'
+        # (nome/posizione che Mexal cerca per l'import): così l'export "atterra"
+        # nel posto giusto, come il file che ha funzionato. Confermando si
+        # sovrascrive l'originale (l'app fa scrittura sicura via file temporaneo).
+        mexal_dir = os.path.dirname(orig)
         out = filedialog.asksaveasfilename(
-            title="Salva CSV aggiornato per Mexal",
+            title="Salva per Mexal (consigliato: anar_idu.csv nella cartella Mexal)",
             defaultextension=".csv",
             filetypes=[("CSV", "*.csv")],
-            initialfile=f"anar_idu_aggiornato_{datetime.now().strftime('%Y%m%d')}.csv"
+            initialdir=mexal_dir,
+            initialfile="anar_idu.csv"
         )
         if not out:
             return
@@ -301,7 +306,8 @@ class IDUApp(tk.Tk):
                     f"CSV salvato:\n{out}\n\n"
                     f"Articoli aggiornati: {res['articoli_aggiornati']}\n"
                     f"Prezzi modificati: {res['prezzi_modificati']}\n\n"
-                    "Puoi reimportarlo in Mexal."))
+                    "Ora importalo in Mexal (Trasferimento archivi → Caricamento "
+                    "ASCII/CSV) con Importazione definitiva = S."))
             except Exception as e:
                 self._log(self.import_log, f"❌ Errore export: {e}")
                 logger.exception("Export Mexal")

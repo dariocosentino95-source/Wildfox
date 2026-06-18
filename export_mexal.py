@@ -123,11 +123,17 @@ def export_to_mexal_csv(csv_originale: str, output_path: str,
     # Salva nello stesso formato: ; separatore, latin-1, virgola decimale
     # quoting=csv.QUOTE_MINIMAL + quotechar='"' protegge i campi che
     # contengono ';' (es. descrizioni) senza alterare i campi normali.
-    import csv
+    import csv, os, tempfile
     # errors='replace': se un codice/descrizione contiene un carattere non
     # rappresentabile in latin-1 (es. da uno scraping), non blocca l'export.
-    df.to_csv(output_path, sep=';', encoding='latin-1', index=False,
+    # Scrive su file temporaneo e poi sostituisce: è sicuro anche quando
+    # output_path coincide col file di riferimento (overwrite di anar_idu.csv).
+    out_dir = os.path.dirname(os.path.abspath(output_path)) or '.'
+    fd, tmp = tempfile.mkstemp(suffix='.csv', dir=out_dir)
+    os.close(fd)
+    df.to_csv(tmp, sep=';', encoding='latin-1', index=False,
               quoting=csv.QUOTE_MINIMAL, quotechar='"', errors='replace')
+    os.replace(tmp, output_path)
 
     if log_cb:
         log_cb(f"✅ Esportato: {output_path}")
