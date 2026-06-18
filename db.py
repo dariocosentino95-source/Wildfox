@@ -392,6 +392,30 @@ def get_all_suppliers():
     return rows
 
 
+def add_supplier(codice_mexal: str, nome: str = ''):
+    """
+    Registra un nuovo fornitore (es. uno non ancora collegato ad alcun articolo
+    nell'anar). Se esiste già, ne aggiorna solo il nome (se fornito).
+    Ritorna l'id del fornitore.
+    """
+    codice_mexal = (codice_mexal or '').strip()
+    if not codice_mexal:
+        raise ValueError("Codice Mexal del fornitore mancante.")
+    conn = get_connection()
+    try:
+        conn.execute("""
+            INSERT INTO fornitori (codice_mexal, nome) VALUES (?, ?)
+            ON CONFLICT(codice_mexal) DO UPDATE SET
+                nome = COALESCE(NULLIF(excluded.nome, ''), fornitori.nome)
+        """, (codice_mexal, nome.strip()))
+        conn.commit()
+        row = conn.execute("SELECT id FROM fornitori WHERE codice_mexal=?",
+                           (codice_mexal,)).fetchone()
+        return row['id'] if row else None
+    finally:
+        conn.close()
+
+
 def update_supplier_info(fornitore_id, nome, url, note):
     conn = get_connection()
     conn.execute("UPDATE fornitori SET nome=?, url_portale=?, note=? WHERE id=?",

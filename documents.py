@@ -20,10 +20,12 @@ FORMATO_FORNITORE = {
 }
 
 # Mappa codice Mexal fornitore → formato del documento. Usato quando il fornitore
-# non è auto-rilevabile dal testo (es. Spolzino) e lo si sceglie a mano nel menu.
+# non è auto-rilevabile dal testo (es. i DDT "Grafica") e lo si sceglie a mano nel menu.
+# Il formato "grafica" è condiviso da più fornitori che usano lo stesso gestionale.
 FORMATO_PER_CODICE = {
     '60100759': 'cardinale',
-    '60100001': 'spolzino',
+    '60100001': 'grafica',   # Spolzino
+    '60100830': 'grafica',   # Aqualif
 }
 
 
@@ -58,8 +60,8 @@ def parse_items(pdf_path: str, formato: str = 'auto'):
         formato = price_engine._detect_pdf_format(pdf_path)
     if formato == 'cardinale':
         return price_engine._parse_cardinale_pdf(pdf_path)
-    if formato == 'spolzino':
-        return price_engine._parse_spolzino_pdf(pdf_path)
+    if formato in ('grafica', 'spolzino'):   # 'spolzino' = alias storico
+        return price_engine._parse_grafica_pdf(pdf_path)
     return price_engine._parse_generic_pdf(pdf_path)
 
 

@@ -188,12 +188,14 @@ def _parse_cardinale_pdf(pdf_path: str, progress_cb=None):
     return results
 
 
-def _parse_spolzino_pdf(pdf_path: str, progress_cb=None):
+def _parse_grafica_pdf(pdf_path: str, progress_cb=None):
     """
-    Parser per DDT/fattura Spolzino: UNA riga per articolo, formato
+    Parser per i DDT/fatture prodotti dal gestionale "Grafica" (usato da più
+    fornitori: Spolzino, Aqualif, ...). UNA riga per articolo:
         CODICE  DESCRIZIONE...  UM  QTA  PREZZO_LORDO  SCONTO...  TOTALE_NETTO_RIGA  [cod]
     Es: 'IGI462 VASO ... PZ 10 61,000 55,04,00 263,52 1022'
-    Il prezzo fornitore (unitario) = TOTALE_NETTO_RIGA / QTA.
+    Il trailer finale (es. 1022) può mancare. Prezzo fornitore unitario =
+    TOTALE_NETTO_RIGA / QTA.
     """
     import pdfplumber
     line_re = re.compile(

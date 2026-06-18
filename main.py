@@ -1617,6 +1617,19 @@ class IDUApp(tk.Tk):
         self.sup_tree.bind('<<TreeviewSelect>>', self._on_supplier_select)
         _btn(f, "🔄 Carica", self._load_suppliers).pack(side='top', padx=20, pady=4, anchor='w')
 
+        # Aggiungi un fornitore non ancora presente (es. nuovo fornitore Mexal)
+        af = tk.LabelFrame(f, text=" Aggiungi nuovo fornitore ", bg=BG2, fg=FG2, font=FONT_S)
+        af.pack(fill='x', padx=20, pady=4)
+        tk.Label(af, text="Codice Mexal:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(8, 2), pady=6)
+        self.newsup_cod_var = tk.StringVar()
+        tk.Entry(af, textvariable=self.newsup_cod_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=14).pack(side='left', padx=4)
+        tk.Label(af, text="Nome:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(8, 2))
+        self.newsup_nome_var = tk.StringVar()
+        tk.Entry(af, textvariable=self.newsup_nome_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=24).pack(side='left', padx=4)
+        _btn(af, "➕ Aggiungi", self._add_supplier, color=ACCENT2).pack(side='left', padx=8)
+
         # Form edit
         ef = tk.LabelFrame(f, text=" Modifica fornitore ", bg=BG2, fg=FG2, font=FONT_S)
         ef.pack(fill='x', padx=20, pady=8)
@@ -1669,6 +1682,22 @@ class IDUApp(tk.Tk):
         self.sup_url_var.set(r.get('url_portale') or '')
         self.sup_note_txt.delete('1.0', 'end')
         self.sup_note_txt.insert('1.0', r.get('note') or '')
+
+    def _add_supplier(self):
+        cod = self.newsup_cod_var.get().strip()
+        nome = self.newsup_nome_var.get().strip()
+        if not cod:
+            messagebox.showerror("Errore",
+                                 "Inserisci il codice Mexal del fornitore (es. 60100830).")
+            return
+        db.add_supplier(cod, nome)
+        self.newsup_cod_var.set('')
+        self.newsup_nome_var.set('')
+        self._load_suppliers()
+        if hasattr(self, '_doc_refresh_forn_combo'):
+            self._doc_refresh_forn_combo()   # aggiorna il menu del tab Documenti
+        messagebox.showinfo("Aggiunto", f"Fornitore {cod} aggiunto.\n"
+                            "Ora è selezionabile anche nel tab 'Documenti Fornitore'.")
 
     def _save_supplier(self):
         sid = getattr(self, '_edit_supplier_id', None)
