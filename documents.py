@@ -26,6 +26,7 @@ FORMATO_PER_CODICE = {
     '60100759': 'cardinale',
     '60100001': 'grafica',   # Spolzino
     '60100830': 'grafica',   # Aqualif
+    '60100034': 'emcidi',    # EM.CI.DI Finocchiaro
 }
 
 
@@ -62,6 +63,8 @@ def parse_items(pdf_path: str, formato: str = 'auto'):
         return price_engine._parse_cardinale_pdf(pdf_path)
     if formato in ('grafica', 'spolzino'):   # 'spolzino' = alias storico
         return price_engine._parse_grafica_pdf(pdf_path)
+    if formato == 'emcidi':
+        return price_engine._parse_emcidi_pdf(pdf_path)
     return price_engine._parse_generic_pdf(pdf_path)
 
 

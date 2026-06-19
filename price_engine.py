@@ -234,6 +234,55 @@ def _parse_grafica_pdf(pdf_path: str, progress_cb=None):
     return results
 
 
+def _parse_emcidi_pdf(pdf_path: str, progress_cb=None):
+    """
+    Parser per DDT/bolla EM.CI.DI (Finocchiaro). UNA riga per articolo:
+        CODICE  DESCRIZIONE...  UM  QTA  PREZZO_UNITARIO  [SCONTO]  PREZZO_TOTALE  C.IVA
+    Es: 'CAV.G010003 GOMITO ... NR 10 12,0938 44 67,73 22'
+        'PED.43CPN081A1 4CPM ... PZ 4 111,0000 444,00 22'   (sconto assente)
+    Prezzo unitario = prezzo LORDO; il netto unitario = PREZZO_TOTALE / QTA.
+    L'ultimo numero (1-2 cifre) è il codice IVA, non un prezzo.
+    """
+    import pdfplumber
+    line_re = re.compile(
+        r'^(?P<cod>[A-Z0-9][A-Z0-9.\-/]{2,})\s+'
+        r'(?P<body>.+?)\s+'
+        r'(?P<tot>\d{1,3}(?:\.\d{3})*,\d{2})\s+'
+        r'(?P<civa>\d{1,2})\s*$')
+    tail_re = re.compile(
+        r'\b([A-Z]{1,3})\s+(\d+)\s+(\d+,\d{4})'
+        r'(?:\s+(\d{1,2}(?:\+\d{1,2})*))?\s*$')
+
+    def _num(s):
+        return float(s.replace('.', '').replace(',', '.'))
+
+    results = []
+    with pdfplumber.open(pdf_path) as pdf:
+        total = len(pdf.pages)
+        for p_idx, page in enumerate(pdf.pages):
+            for line in (page.extract_text() or '').splitlines():
+                m = line_re.match(line.strip())
+                if not m:
+                    continue
+                mb = tail_re.search(m.group('body'))
+                if not mb:
+                    continue
+                qta = int(mb.group(2))
+                lordo = _num(mb.group(3))
+                tot = _num(m.group('tot'))
+                unit_netto = round(tot / qta, 4) if qta else None
+                results.append({
+                    'codice': m.group('cod'),
+                    'qta': qta,
+                    'prezzo_lordo': lordo,
+                    'prezzo_netto': unit_netto,   # unitario netto
+                    'sconto': mb.group(4) or None,
+                })
+            if progress_cb:
+                progress_cb(p_idx + 1, total)
+    return results
+
+
 def _parse_generic_pdf(pdf_path: str, progress_cb=None):
     """Parser generico: un codice + un prezzo per riga."""
     import pdfplumber

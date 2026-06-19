@@ -64,9 +64,10 @@ d'ordine del fornitore (PDF). Flusso:
 
 > **Fornitori riconosciuti:**
 > - **Cardinale** — auto-rilevato dal PDF.
-> - **Spolzino, Aqualif** — usano lo stesso formato DDT (gestionale "Grafica").
->   Non sono rilevabili dal testo: selezionali a mano dal menu *Fornitore* prima
->   di premere Analizza.
+> - **Spolzino, Aqualif** — stesso formato DDT (gestionale "Grafica").
+> - **EM.CI.DI (Finocchiaro)** — formato proprio (`CODICE … UM QTA PREZZO SC.% TOTALE IVA`).
+>   Spolzino, Aqualif ed EM.CI.DI non sono rilevabili dal testo: selezionali a
+>   mano dal menu *Fornitore* prima di premere Analizza.
 >
 > Un fornitore deve esistere nel database per essere selezionabile. Se è nuovo
 > (non collegato ad alcun articolo nell'anar), aggiungilo dal tab **🏭 Fornitori
