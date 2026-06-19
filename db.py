@@ -110,6 +110,12 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_fornitori_codice
             ON fornitori(codice_mexal);
     """)
+    # Migrazione: colonne aggiunte dopo la prima versione
+    cols = {r[1] for r in c.execute("PRAGMA table_info(articoli)")}
+    if 'iva' not in cols:
+        c.execute("ALTER TABLE articoli ADD COLUMN iva TEXT")
+    if 'creato_app' not in cols:
+        c.execute("ALTER TABLE articoli ADD COLUMN creato_app INTEGER DEFAULT 0")
     conn.commit()
     conn.close()
     logger.info("DB inizializzato.")
@@ -163,7 +169,8 @@ def import_from_csv(csv_path: str, progress_callback=None):
                 costo_ult   = COALESCE(excluded.costo_ult, articoli.costo_ult),
                 data_agg    = excluded.data_agg,
                 ean         = excluded.ean,
-                listino_rif = excluded.listino_rif
+                listino_rif = excluded.listino_rif,
+                creato_app  = 0
         """, (codice, descrizione, descr_agg, um, costo_ult, data_agg, ean, listino))
         art_id = c.execute("SELECT id FROM articoli WHERE codice=?", (codice,)).fetchone()[0]
         righe_ok += 1
@@ -422,6 +429,45 @@ def update_supplier_info(fornitore_id, nome, url, note):
                  (nome, url, note, fornitore_id))
     conn.commit()
     conn.close()
+
+
+def create_article(codice: str, descrizione: str, um: str = 'PZ',
+                   iva: str = '22', categoria=None, costo=None):
+    """
+    Crea un NUOVO articolo nel database (prodotto non ancora presente in Mexal).
+    Viene marcato con creato_app=1 così l'export aggiunge una riga nuova nell'anar
+    da reimportare in Mexal. Se il codice esiste già, ne aggiorna i dati.
+    categoria = categoria prezzi (_ARLIS, 1..27); costo = costo ultimo (_ARCUL).
+    Ritorna l'id dell'articolo.
+    """
+    codice = (codice or '').strip()
+    if not codice:
+        raise ValueError("Codice articolo mancante.")
+    cat = None
+    try:
+        cat = int(float(str(categoria))) if categoria not in (None, '') else None
+    except (ValueError, TypeError):
+        cat = None
+    conn = get_connection()
+    try:
+        conn.execute("""
+            INSERT INTO articoli
+                (codice, descrizione, um, costo_ult, listino_rif, iva, creato_app)
+            VALUES (?,?,?,?,?,?,1)
+            ON CONFLICT(codice) DO UPDATE SET
+                descrizione = excluded.descrizione,
+                um          = excluded.um,
+                costo_ult   = COALESCE(excluded.costo_ult, articoli.costo_ult),
+                listino_rif = excluded.listino_rif,
+                iva         = excluded.iva,
+                creato_app  = 1
+        """, (codice, descrizione.strip(), (um or 'PZ').strip(),
+              costo, cat, (iva or '22').strip()))
+        conn.commit()
+        return conn.execute("SELECT id FROM articoli WHERE codice=?",
+                            (codice,)).fetchone()['id']
+    finally:
+        conn.close()
 
 
 def create_article_supplier_link(articolo_id: int, fornitore_id: int,

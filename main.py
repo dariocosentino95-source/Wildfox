@@ -240,6 +240,14 @@ class IDUApp(tk.Tk):
         _btn(exp_row, "📤 Genera CSV aggiornato",
              self._run_export_mexal, color=ACCENT2).pack(side='left', padx=4)
 
+        self.export_listini_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            f, text="Ricalcola anche i listini di vendita (BASE/INSTALL/APPALTI/INGROSS) "
+                    "dalle categorie prezzi",
+            variable=self.export_listini_var, font=FONT_S, bg=BG2, fg=FG,
+            selectcolor=CARD, activebackground=BG2, activeforeground=FG
+        ).pack(padx=20, pady=(2, 0), anchor='w')
+
     def _browse_export_orig(self):
         start = DATA_DIR
         # Precompila col CSV già usato per l'import, se presente
@@ -286,6 +294,7 @@ class IDUApp(tk.Tk):
 
         self.import_log.delete('1.0', 'end')
         self.import_progress['value'] = 0
+        ricalcola = self.export_listini_var.get()
 
         def _task():
             def prog(i, tot):
@@ -297,7 +306,8 @@ class IDUApp(tk.Tk):
 
             try:
                 res = export_mexal.export_to_mexal_csv(
-                    orig, out, progress_cb=prog, log_cb=log)
+                    orig, out, progress_cb=prog, log_cb=log,
+                    ricalcola_listini=ricalcola)
                 self._set_progress(self.import_progress, 100)
                 self._log(self.import_log,
                     f"\n📤 File pronto per Mexal:\n   {out}\n"
@@ -484,6 +494,62 @@ class IDUApp(tk.Tk):
         _btn(f, "📋 Storico prezzi articolo", self._show_history, color=ACCENT).pack(
             anchor='e', padx=20, pady=4)
 
+        # ── Crea nuovo articolo (prodotto non ancora in Mexal) ──
+        _section(f, "➕ Crea nuovo articolo (prodotto non ancora presente in Mexal)")
+        naf = tk.LabelFrame(f, text=" Nuovo articolo ", bg=BG2, fg=FG2, font=FONT_S)
+        naf.pack(fill='x', padx=20, pady=4)
+
+        r1 = tk.Frame(naf, bg=BG2); r1.pack(fill='x', padx=6, pady=3)
+        tk.Label(r1, text="Codice:", font=FONT_S, bg=BG2, fg=FG).pack(side='left')
+        self.na_cod_var = tk.StringVar()
+        tk.Entry(r1, textvariable=self.na_cod_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=14).pack(side='left', padx=4)
+        tk.Label(r1, text="Descrizione:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(8, 0))
+        self.na_des_var = tk.StringVar()
+        tk.Entry(r1, textvariable=self.na_des_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=40).pack(side='left', padx=4)
+
+        r2 = tk.Frame(naf, bg=BG2); r2.pack(fill='x', padx=6, pady=3)
+        tk.Label(r2, text="UM:", font=FONT_S, bg=BG2, fg=FG).pack(side='left')
+        self.na_um_var = tk.StringVar(value="PZ")
+        tk.Entry(r2, textvariable=self.na_um_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=5).pack(side='left', padx=4)
+        tk.Label(r2, text="IVA:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(8, 0))
+        self.na_iva_var = tk.StringVar(value="22")
+        tk.Entry(r2, textvariable=self.na_iva_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=4).pack(side='left', padx=4)
+        tk.Label(r2, text="Categoria prezzi (1-27):", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(8, 0))
+        self.na_cat_var = tk.StringVar()
+        tk.Entry(r2, textvariable=self.na_cat_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=4).pack(side='left', padx=4)
+        tk.Label(r2, text="Costo:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(8, 0))
+        self.na_costo_var = tk.StringVar()
+        tk.Entry(r2, textvariable=self.na_costo_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=8).pack(side='left', padx=4)
+
+        r3 = tk.Frame(naf, bg=BG2); r3.pack(fill='x', padx=6, pady=3)
+        tk.Label(r3, text="(opz.) Fornitore:", font=FONT_S, bg=BG2, fg=FG).pack(side='left')
+        self.na_forn_var = tk.StringVar()
+        self.na_forn_cb = ttk.Combobox(r3, textvariable=self.na_forn_var,
+                                       state='readonly', width=26)
+        self.na_forn_cb.pack(side='left', padx=4)
+        tk.Label(r3, text="Cod. forn.:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(8, 0))
+        self.na_cforn_var = tk.StringVar()
+        tk.Entry(r3, textvariable=self.na_cforn_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=14).pack(side='left', padx=4)
+        tk.Label(r3, text="Prezzo:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(8, 0))
+        self.na_pforn_var = tk.StringVar()
+        tk.Entry(r3, textvariable=self.na_pforn_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=8).pack(side='left', padx=4)
+        _btn(r3, "➕ Crea articolo", self._create_article, color=ACCENT2).pack(side='left', padx=10)
+
+        tk.Label(naf, text=(
+            "L'articolo viene aggiunto all'anar al prossimo '📤 Genera CSV aggiornato'. "
+            "La categoria prezzi serve per calcolare i listini."
+        ), font=FONT_S, bg=BG2, fg=FG2).pack(padx=6, pady=(0, 4), anchor='w')
+
+        self._newart_refresh_forn_combo()
+
     def _search_articles(self):
         q = self.art_search_var.get().strip()
         if not q:
@@ -550,6 +616,49 @@ class IDUApp(tk.Tk):
                 f"{r['valore_nuovo']:.4f}" if r['valore_nuovo'] else '—',
                 r['motivo']
             ))
+
+    def _newart_refresh_forn_combo(self):
+        rows = db.get_all_suppliers()
+        self._newart_forn_map = {f"{r['codice_mexal']} — {r['nome'] or 'N/D'}": r['id']
+                                 for r in rows}
+        self.na_forn_cb['values'] = [''] + list(self._newart_forn_map.keys())
+
+    @staticmethod
+    def _parse_float(s):
+        try:
+            s = str(s).strip().replace(',', '.')
+            return float(s) if s else None
+        except ValueError:
+            return None
+
+    def _create_article(self):
+        cod = self.na_cod_var.get().strip()
+        descr = self.na_des_var.get().strip()
+        if not cod or not descr:
+            messagebox.showerror("Errore", "Inserisci almeno Codice e Descrizione.")
+            return
+        cat = self.na_cat_var.get().strip()
+        try:
+            aid = db.create_article(
+                cod, descr, um=self.na_um_var.get().strip() or 'PZ',
+                iva=self.na_iva_var.get().strip() or '22',
+                categoria=cat or None, costo=self._parse_float(self.na_costo_var.get()))
+        except Exception as e:
+            messagebox.showerror("Errore", f"Creazione articolo fallita: {e}")
+            return
+        fid = getattr(self, '_newart_forn_map', {}).get(self.na_forn_var.get())
+        if fid:
+            db.create_article_supplier_link(aid, fid, self.na_cforn_var.get().strip())
+            pz = self._parse_float(self.na_pforn_var.get())
+            if pz:
+                db.apply_price_update(aid, fid, pz, 'nuovo_articolo')
+        for v in (self.na_cod_var, self.na_des_var, self.na_cat_var,
+                  self.na_costo_var, self.na_cforn_var, self.na_pforn_var):
+            v.set('')
+        self.na_forn_var.set('')
+        messagebox.showinfo(
+            "Creato", f"Articolo {cod} creato.\nVerrà aggiunto all'anar al prossimo "
+            "'📤 Genera CSV aggiornato', poi reimportalo in Mexal.")
 
     # ── TAB: Documenti Fornitore ──────────────────────────────────────────────
 

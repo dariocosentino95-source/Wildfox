@@ -10,12 +10,35 @@ Mexal reimporta il file senza errori di struttura.
 import pandas as pd
 import logging
 import db
+import listini
 
 logger = logging.getLogger(__name__)
 
+# Default strutturali per una NUOVA riga articolo (campi presenti in ~tutti gli
+# articoli reali). Usati quando si esporta un articolo creato nell'app e non
+# ancora presente in Mexal, così la riga è valida per la reimportazione.
+_NUOVO_DEFAULTS = {
+    '_ARTIP': 'A', '_ARANN': 'N', '_ARDEC': '2', '_ARVST': '1', '_ARVUL': '1',
+    '_ARVUP': '1', '_ARRIC': '80100002', '_ARCOS': '70201001', '_ARSCO': '1',
+    '_ARDBP': 'N', '_ARDBV': 'N', '_ARCAR': 'N', '_ARDBA': 'N', '_ARCTG': 'N',
+    '_ARFRM': 'N', 'CALENDPROD': 'N', '_ARPCAS': 'N', '_ARIMA': 'N',
+    '_ARIUS': 'N', '_ARPRIT1': 'N', 'ARGSI': 'N', 'ARENAS': 'N',
+    'AREMPAM': 'N', 'AREMPALS': 'N', '_ARGRR': 'N',
+}
+for _i in range(1, 19):
+    _NUOVO_DEFAULTS[f'TIPPROV{_i}'] = '%'
+
+
+def _parse_num(val):
+    try:
+        s = str(val).strip()
+        return float(s.replace('.', '').replace(',', '.')) if s else None
+    except (ValueError, TypeError):
+        return None
+
 
 def export_to_mexal_csv(csv_originale: str, output_path: str,
-                        progress_cb=None, log_cb=None):
+                        progress_cb=None, log_cb=None, ricalcola_listini=False):
     """
     Legge il CSV originale Mexal, aggiorna i prezzi fornitore con i valori
     correnti del database, e salva un nuovo CSV nello stesso identico formato.
@@ -114,11 +137,94 @@ def export_to_mexal_csv(csv_originale: str, output_path: str,
                 df.at[i, '_ARCUL'] = nuovo_costo
                 modificato = True
 
+        # Ricalcola i listini di vendita (_ARPRZ 1..4) = costo × ricarico categoria
+        if ricalcola_listini and '_ARLIS' in colonne:
+            cat = str(df.at[i, '_ARLIS']).strip()
+            base_cost = costo_db.get(codice)
+            if base_cost is None and '_ARCUL' in colonne:
+                base_cost = _parse_num(df.at[i, '_ARCUL'])
+            for n, prezzo in listini.calcola_listini(base_cost, cat).items():
+                col = f'_ARPRZ({n})'
+                if col in colonne:
+                    nv = _format_mexal_number(prezzo)
+                    if df.at[i, col] != nv:
+                        df.at[i, col] = nv
+                        modificato = True
+
         if modificato:
             articoli_agg += 1
 
         if progress_cb and i % 1000 == 0:
             progress_cb(i, total)
+
+    # ── Articoli NUOVI creati nell'app (non ancora in Mexal): aggiungi le righe ──
+    from datetime import datetime as _dt
+    conn = db.get_connection()
+    try:
+        nuovi = conn.execute("""
+            SELECT codice, descrizione, um, iva, listino_rif, costo_ult
+            FROM articoli WHERE creato_app = 1
+        """).fetchall()
+    finally:
+        conn.close()
+    nuovi_agg = 0
+    if nuovi:
+        anar_codes = {str(df.at[i, '_ARCOD']).strip().upper() for i in range(total)}
+        oggi = _dt.now().strftime('%d%m%Y')
+        nuove_righe = []
+        for art in nuovi:
+            cod = (art['codice'] or '').strip()
+            if not cod or cod.upper() in anar_codes:
+                continue  # già presente nell'anar: si aggiorna nel loop, non si duplica
+            riga = {c: '' for c in colonne}
+            for k, v in _NUOVO_DEFAULTS.items():
+                if k in riga:
+                    riga[k] = v
+            riga['_ARCOD'] = cod
+            if '_ARDES' in riga:
+                riga['_ARDES'] = (art['descrizione'] or '')[:60]
+            if '_ARUM1' in riga:
+                riga['_ARUM1'] = (art['um'] or 'PZ')
+            if '_ARIVA' in riga:
+                riga['_ARIVA'] = (art['iva'] or '22')
+            if '_ARDTC' in riga:
+                riga['_ARDTC'] = oggi
+            if '_ARDTA' in riga:
+                riga['_ARDTA'] = oggi
+            cat = art['listino_rif']
+            if cat and '_ARLIS' in riga:
+                riga['_ARLIS'] = str(cat)
+            costo = costo_db.get(cod) or art['costo_ult']
+            if costo:
+                cv = _format_mexal_number(costo)
+                for cc in ('_ARCUL', '_ARCUP'):
+                    if cc in riga:
+                        riga[cc] = cv
+            # blocco fornitore (se l'articolo nuovo ha già un collegamento)
+            for slot, dati in prezzi_db.get(cod, {}).items():
+                cols_slot = (f'_ARFOR({slot})', f'_ARFPR({slot})',
+                             f'_ARCOF({slot})', f'_ARVAL({slot})')
+                if cols_slot[0] in riga and dati['fornitore_codice']:
+                    riga[cols_slot[0]] = dati['fornitore_codice']
+                if cols_slot[1] in riga and dati['prezzo_forn'] is not None:
+                    riga[cols_slot[1]] = _format_mexal_number(dati['prezzo_forn'])
+                if cols_slot[2] in riga and dati['cod_forn']:
+                    riga[cols_slot[2]] = dati['cod_forn']
+                if cols_slot[3] in riga:
+                    riga[cols_slot[3]] = '1'
+            # listini
+            if ricalcola_listini and costo and cat:
+                for n, prezzo in listini.calcola_listini(costo, cat).items():
+                    col = f'_ARPRZ({n})'
+                    if col in riga:
+                        riga[col] = _format_mexal_number(prezzo)
+            nuove_righe.append(riga)
+        if nuove_righe:
+            df = pd.concat([df, pd.DataFrame(nuove_righe, columns=colonne)],
+                           ignore_index=True)
+            nuovi_agg = len(nuove_righe)
+            if log_cb:
+                log_cb(f"   Articoli NUOVI aggiunti: {nuovi_agg}")
 
     # Salva nello stesso formato: ; separatore, latin-1, virgola decimale
     # quoting=csv.QUOTE_MINIMAL + quotechar='"' protegge i campi che
@@ -135,19 +241,21 @@ def export_to_mexal_csv(csv_originale: str, output_path: str,
               quoting=csv.QUOTE_MINIMAL, quotechar='"', errors='replace')
     os.replace(tmp, output_path)
 
+    righe_finali = len(df)
     if log_cb:
         log_cb(f"✅ Esportato: {output_path}")
-        log_cb(f"   Righe totali: {total}")
+        log_cb(f"   Righe totali: {righe_finali}")
         log_cb(f"   Articoli aggiornati: {articoli_agg}")
         log_cb(f"   Prezzi modificati: {prezzi_mod}")
 
-    logger.info(f"Export Mexal: {total} righe, {articoli_agg} articoli agg., "
-                f"{prezzi_mod} prezzi mod.")
+    logger.info(f"Export Mexal: {righe_finali} righe, {articoli_agg} articoli agg., "
+                f"{prezzi_mod} prezzi mod., {nuovi_agg} nuovi.")
 
     return {
-        'righe': total,
+        'righe': righe_finali,
         'articoli_aggiornati': articoli_agg,
         'prezzi_modificati': prezzi_mod,
+        'nuovi': nuovi_agg,
         'output': output_path,
     }
 

@@ -73,6 +73,27 @@ d'ordine del fornitore (PDF). Flusso:
 > → Aggiungi nuovo fornitore** (codice Mexal + nome). IdroFerrara e Bonardi si
 > aggiungono quando disponibili i loro documenti di esempio.
 
+### 💰 Listini di vendita (BASE / INSTALL / APPALTI / INGROSS)
+I 4 listini di vendita (`_ARPRZ(1..4)`) si calcolano dal **costo × ricarico della
+categoria prezzi** dell'articolo (campo `_ARLIS`, 1–27). I ricarichi sono in
+[listini.py](listini.py) (presi dalla stampa "Elenco listini" di Mexal).
+
+Nel tab **📥 Importa / Esporta Mexal**, spunta **"Ricalcola anche i listini di
+vendita"** prima di *Genera CSV aggiornato*: l'app scrive `_ARPRZ(1..4)` per ogni
+articolo con categoria. I prezzi scritti sono **netti** (senza IVA); l'IVA 22% la
+applica Mexal in vendita.
+
+> Se cambi i ricarichi delle categorie in Mexal, aggiorna la tabella in `listini.py`.
+
+### ➕ Crea nuovo articolo
+Per un prodotto **non ancora in Mexal**: tab **🔍 Articoli → Crea nuovo articolo**
+(codice, descrizione, UM, IVA, categoria prezzi, costo, e facoltativo fornitore +
+codice + prezzo). L'articolo viene aggiunto come **riga nuova** nell'anar al
+prossimo *Genera CSV aggiornato*, pronto da reimportare in Mexal — così non devi
+crearlo prima in Mexal e ri-esportare.
+
+> ⚠️ I nuovi articoli vanno **verificati in Mexal** dopo la prima importazione.
+
 ### 💾 Upload Listino
 Carica un listino aggiornato dal fornitore (CSV o PDF) e applica le regole:
 
@@ -167,6 +188,7 @@ idu_price_manager/
 ├── scraper.py         — scraping portali fornitori (Playwright/requests)
 ├── scheduler.py       — aggiornamento settimanale automatico
 ├── export_mexal.py    — generazione CSV anar aggiornato per Mexal
+├── listini.py         — ricarichi per categoria prezzi → calcolo listini vendita
 ├── stock_engine.py    — carico magazzino: aggiorna le giacenze (file anpr)
 ├── requirements.txt   — dipendenze Python
 ├── installa.bat       — installa dipendenze + browser + DB
