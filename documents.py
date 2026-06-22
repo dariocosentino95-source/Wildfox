@@ -10,6 +10,7 @@ import logging
 import db
 import price_engine
 import stock_engine
+import carico
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,8 @@ def classify(items, fornitore_id):
 
 def apply_document(items, fornitore_id, manual_links=None,
                    carica_giacenze=False, anpr_path=None, anpr_out=None,
+                   genera_carico=False, causale='CL', magazzino='1',
+                   mote_out=None, mori_out=None,
                    motivo='documento', log_cb=None):
     """
     Applica gli aggiornamenti:
@@ -144,13 +147,17 @@ def apply_document(items, fornitore_id, manual_links=None,
         (_ARCOF) nel database, per ogni riga risolvibile;
       - per i codici 'nuovi', usa manual_links {codice_doc_UPPER: codice_mexal}
         per creare il collegamento prima di applicare il prezzo;
-      - se carica_giacenze: aggiorna le giacenze (file anpr) con la regola
-        nuova = max(esistenza, 0) + quantità.
-    Ritorna un report con i conteggi e l'eventuale report giacenze.
+      - se genera_carico: genera un documento di CARICO (mote/mori) con le
+        quantità entranti, da importare in Mexal per aggiornare le giacenze
+        (modo nativo: il carico aggiorna giacenze e, con i parametri, costo/listini).
+      - se carica_giacenze (legacy): aggiorna direttamente l'anpr (Mexal però
+        di norma ignora i progressivi in import: preferire genera_carico).
+    Ritorna un report con i conteggi, l'eventuale carico e report anpr.
     """
     manual_links = {k.upper(): v for k, v in (manual_links or {}).items()}
     aggiornati, creati, collegati_man, non_risolti, senza_prezzo = [], [], [], [], []
-    giac = {}  # _ARCOD → quantità entrante
+    giac = {}     # _ARCOD → quantità entrante
+    prezzi = {}   # _ARCOD → prezzo netto (per il carico)
 
     for it in items:
         cod = (it.get('codice') or '').strip()
@@ -184,9 +191,35 @@ def apply_document(items, fornitore_id, manual_links=None,
                 aggiornati.append(cod)          # già collegato a questo fornitore
             if arcod and qta:
                 giac[arcod] = giac.get(arcod, 0.0) + qta
+                if netto is not None:
+                    prezzi[arcod] = netto
         else:
             non_risolti.append(cod)
 
+    # ── Genera il documento di CARICO (modo nativo per le giacenze) ──
+    carico_report = None
+    if genera_carico and giac and mote_out and mori_out:
+        conn = db.get_connection()
+        f = conn.execute("SELECT codice_mexal, nome FROM fornitori WHERE id=?",
+                         (fornitore_id,)).fetchone()
+        descr_map = {a['codice'].upper(): (a['descrizione'], a['um'])
+                     for a in db.get_articles_by_codes(list(giac))}
+        conn.close()
+        forn_cod = f['codice_mexal'] if f else ''
+        forn_nome = (f['nome'] if f and f['nome'] else forn_cod)
+        items_carico = []
+        for arcod, qta in giac.items():
+            d, u = descr_map.get(arcod.upper(), ('', 'PZ'))
+            items_carico.append({'arcod': arcod, 'descrizione': d or '', 'um': u or 'PZ',
+                                 'qta': qta, 'prezzo': prezzi.get(arcod, 0), 'iva': ' 22  '})
+        carico_report = carico.genera_carico(
+            items_carico, forn_cod, forn_nome, mote_out, mori_out,
+            causale=causale, magazzino=magazzino)
+        if log_cb:
+            log_cb(f"Carico generato: {carico_report['righe']} righe, "
+                   f"causale {carico_report['causale']}")
+
+    # ── Legacy: aggiornamento diretto anpr (di norma ignorato da Mexal in import) ──
     giac_report = None
     if carica_giacenze and anpr_path and giac:
         giac_report = stock_engine.update_anpr(
@@ -199,6 +232,7 @@ def apply_document(items, fornitore_id, manual_links=None,
         'collegati_manuale': collegati_man,
         'non_risolti': non_risolti,
         'senza_prezzo': senza_prezzo,
+        'carico': carico_report,
         'giacenze': giac_report,
         'n_giacenze': len(giac),
     }

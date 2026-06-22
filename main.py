@@ -34,6 +34,7 @@ import scheduler
 import export_mexal
 import stock_engine
 import documents
+import carico
 
 
 # ── rilevamento file Mexal (Opzione "collega a Mexal") ─────────────────────────
@@ -708,18 +709,21 @@ class IDUApp(tk.Tk):
              color='#3a3f5c').pack(anchor='w', padx=6, pady=(0, 4))
 
         row3 = tk.Frame(f, bg=BG2); row3.pack(fill='x', padx=20, pady=4)
-        self.doc_giacenze_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(row3, text="Carica anche le giacenze (anpr)",
-                       variable=self.doc_giacenze_var, font=FONT_S, bg=BG2, fg=FG,
+        self.doc_carico_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(row3, text="Genera carico magazzino (movimento da importare in Mexal)",
+                       variable=self.doc_carico_var, font=FONT_S, bg=BG2, fg=FG,
                        selectcolor=CARD, activebackground=BG2,
                        activeforeground=FG).pack(side='left')
-        tk.Label(row3, text="anpr:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(12, 2))
-        self.doc_anpr_var = tk.StringVar()
-        tk.Entry(row3, textvariable=self.doc_anpr_var, font=FONT_S, bg=CARD, fg=FG,
-                 insertbackground=FG, width=32).pack(side='left', padx=4)
-        _btn(row3, "📂", self._browse_doc_anpr).pack(side='left')
+        tk.Label(row3, text="Causale:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(12, 2))
+        self.doc_causale_var = tk.StringVar(value="CL")
+        tk.Entry(row3, textvariable=self.doc_causale_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=5).pack(side='left', padx=4)
+        tk.Label(row3, text="Magazzino:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(8, 2))
+        self.doc_mag_var = tk.StringVar(value="1")
+        tk.Entry(row3, textvariable=self.doc_mag_var, font=FONT_S, bg=CARD, fg=FG,
+                 insertbackground=FG, width=4).pack(side='left', padx=4)
 
-        _btn(f, "✅ Applica (codici + prezzi + giacenze)",
+        _btn(f, "✅ Applica (codici + prezzi + carico magazzino)",
              self._run_doc_apply, color=ACCENT2).pack(anchor='w', padx=20, pady=6)
         self.doc_log = _log_box(f, height=6)
         self._doc_refresh_forn_combo()
@@ -844,24 +848,18 @@ class IDUApp(tk.Tk):
             messagebox.showerror("Errore", "Seleziona il fornitore.")
             return
         manual = self._parse_doc_links(self.doc_links_txt.get('1.0', 'end'))
-        carica = self.doc_giacenze_var.get()
-        anpr = self.doc_anpr_var.get().strip()
-        anpr_out = None
-        if carica:
-            if not anpr or not os.path.exists(anpr):
-                messagebox.showerror(
-                    "Errore", "Indica il file anpr per le giacenze (o togli la spunta).")
-                return
-            anpr_out = filedialog.asksaveasfilename(
-                title="Salva anpr aggiornato", defaultextension=".csv",
-                filetypes=[("CSV", "*.csv")],
-                initialfile=f"anpr_idu_aggiornato_{datetime.now().strftime('%Y%m%d')}.csv")
-            if not anpr_out:
-                return
+        fai_carico = self.doc_carico_var.get()
+        causale = self.doc_causale_var.get().strip() or 'CL'
+        magazzino = self.doc_mag_var.get().strip() or '1'
+        # il carico si salva nella cartella dati di Mexal
+        mexal_dir = os.path.dirname(carico.MOTE_SRC)
+        mote_out = os.path.join(mexal_dir, 'carico_mote.csv')
+        mori_out = os.path.join(mexal_dir, 'carico_mori.csv')
         if not messagebox.askyesno(
                 "Conferma",
                 "Verranno aggiornati codici e prezzi nel database"
-                + (" e generato l'anpr aggiornato" if carica else "")
+                + (f" e generato il carico (causale {causale}, mag. {magazzino})"
+                   if fai_carico else "")
                 + ".\nL'anar lo generi poi da '📥 Importa / Esporta Mexal'.\nProcedere?"):
             return
         self.doc_log.delete('1.0', 'end')
@@ -869,19 +867,22 @@ class IDUApp(tk.Tk):
         def _task():
             try:
                 rep = documents.apply_document(
-                    items, fid, manual_links=manual, carica_giacenze=carica,
-                    anpr_path=anpr or None, anpr_out=anpr_out,
+                    items, fid, manual_links=manual,
+                    genera_carico=fai_carico, causale=causale, magazzino=magazzino,
+                    mote_out=mote_out, mori_out=mori_out,
                     log_cb=lambda m: self._log(self.doc_log, m))
-                giac = rep.get('giacenze')
+                car = rep.get('carico')
                 msg = (f"Aggiornati (già collegati): {len(rep['aggiornati'])}\n"
                        f"Auto-collegati: {len(rep['creati'])}\n"
                        f"Collegati manualmente: {len(rep['collegati_manuale'])}\n"
                        f"Non risolti (ancora da collegare): {len(rep['non_risolti'])}\n")
-                if giac:
-                    msg += f"Giacenze aggiornate: {giac['n_articoli']} articoli\n"
-                    msg += f"anpr salvato in:\n{anpr_out}\n"
-                msg += ("\nORA: '📥 Importa / Esporta Mexal' → 'Genera CSV aggiornato' "
-                        "per l'anar, poi reimporta in Mexal (prima un test).")
+                if car:
+                    msg += (f"\n📦 CARICO generato (causale {car['causale']}, "
+                            f"{car['righe']} righe):\n   {mote_out}\n   {mori_out}\n"
+                            "→ Importalo in Mexal: Trasferimento archivi → Caricamento "
+                            "ASCII/CSV → Movimenti di magazzino.\n")
+                msg += ("ORA per i prezzi/codici: '📥 Importa / Esporta Mexal' → "
+                        "'Genera CSV aggiornato' per l'anar, poi reimporta in Mexal.")
                 self._log(self.doc_log, msg)
                 self._ui(lambda m=msg: messagebox.showinfo("Applicato", m))
             except Exception as e:

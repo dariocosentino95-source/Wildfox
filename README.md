@@ -57,10 +57,20 @@ d'ordine del fornitore (PDF). Flusso:
    - **NUOVO** → non riconosciuto: lo colleghi tu (collegamento guidato)
 3. Per i NUOVI: **Precompila codici nuovi** e scrivi accanto il codice Mexal
    (`CODICE_DOC = CODICE_MEXAL`).
-4. **✅ Applica**: aggiorna nel database il codice fornitore (`_ARCOF`, se mancante),
-   il prezzo (`_ARFPR` + regola prezzo base) e, se spuntato, la **giacenza** in `anpr`
-   (`nuova = max(esistenza, 0) + quantità`).
-5. Genera l'`anar` aggiornato da **📥 Importa / Esporta Mexal** e reimporta in Mexal.
+4. **✅ Applica**: aggiorna nel database il codice fornitore (`_ARCOF`, se mancante)
+   e il prezzo (`_ARFPR` + regola prezzo base); se spuntato **"Genera carico
+   magazzino"**, crea anche un **documento di carico** (`carico_mote.csv` +
+   `carico_mori.csv`, causale `CL`) nella cartella Mexal.
+5. **Importa in Mexal:**
+   - i **codici/prezzi** → genera l'`anar` da **📥 Importa / Esporta Mexal** e reimportalo;
+   - le **quantità** → importa il **carico** (Trasferimento archivi → Caricamento
+     ASCII/CSV → Movimenti di magazzino). Il carico aggiorna le giacenze (e, con i
+     parametri di magazzino attivi, costo e listini).
+
+> **Perché un carico e non l'anpr:** in Mexal le giacenze si ricavano dai
+> *movimenti*, non si impostano importando i progressivi. Per questo l'app genera
+> un documento di carico (causale `CL`, `MMGCONDOC=NCF`, `MMPRGMAG=C+`) — formato
+> validato con import reale.
 
 > **Fornitori riconosciuti:**
 > - **Cardinale** — auto-rilevato dal PDF.
