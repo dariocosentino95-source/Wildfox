@@ -56,16 +56,17 @@ def _detect_mexal_file(prefix: str):
     return cands[0]
 
 # ── palette colori ────────────────────────────────────────────────────────────
-BG       = '#1e2130'
-BG2      = '#262a3d'
-ACCENT   = '#4f8ef7'
-ACCENT2  = '#2ecc71'
-WARN     = '#e67e22'
-DANGER   = '#e74c3c'
-FG       = '#e8eaf0'
-FG2      = '#9499b0'
-CARD     = '#2d3250'
-ROW_ALT  = '#272b45'   # righe alternate nelle tabelle
+BG       = '#eef1f5'   # sfondo principale (grigio chiaro)
+BG2      = '#ffffff'   # pannelli / schede (bianco)
+ACCENT   = '#2563eb'   # blu accento
+ACCENT2  = '#16a34a'   # verde (conferma)
+WARN     = '#d97706'   # arancione
+DANGER   = '#dc2626'   # rosso
+FG       = '#1f2937'   # testo scuro
+FG2      = '#6b7280'   # testo attenuato
+CARD     = '#f3f4f6'   # campi / card (grigio chiarissimo)
+ROW_ALT  = '#f7f8fa'   # righe alternate nelle tabelle
+BTN      = '#64748b'   # colore default dei pulsanti (testo bianco)
 FONT     = ('Segoe UI', 10)
 FONT_B   = ('Segoe UI', 10, 'bold')
 FONT_H   = ('Segoe UI', 14, 'bold')
@@ -130,7 +131,6 @@ class IDUApp(tk.Tk):
         self.tab_articles  = tk.Frame(self.nb, bg=BG2)
         self.tab_documenti = tk.Frame(self.nb, bg=BG2)
         self.tab_upload    = tk.Frame(self.nb, bg=BG2)
-        self.tab_magazzino = tk.Frame(self.nb, bg=BG2)
         self.tab_pdf_order = tk.Frame(self.nb, bg=BG2)
         self.tab_scraper   = tk.Frame(self.nb, bg=BG2)
         self.tab_batch     = tk.Frame(self.nb, bg=BG2)
@@ -142,7 +142,6 @@ class IDUApp(tk.Tk):
         self.nb.add(self.tab_articles,  text="  🔍 Articoli  ")
         self.nb.add(self.tab_documenti, text="  🧾 Documenti Fornitore  ")
         self.nb.add(self.tab_upload,    text="  💾 Upload Listino  ")
-        self.nb.add(self.tab_magazzino, text="  📦 Carico Magazzino  ")
         self.nb.add(self.tab_pdf_order, text="  📄 Ordine PDF  ")
         self.nb.add(self.tab_scraper,   text="  🌐 Ricerca Portali  ")
         self.nb.add(self.tab_batch,     text="  🚀 Ricerca Massiva  ")
@@ -154,7 +153,6 @@ class IDUApp(tk.Tk):
         self._build_tab_articles()
         self._build_tab_documenti()
         self._build_tab_upload()
-        self._build_tab_magazzino()
         self._build_tab_pdf_order()
         self._build_tab_scraper()
         self._build_tab_batch()
@@ -214,7 +212,7 @@ class IDUApp(tk.Tk):
             tk.Label(row_h, text=h, font=('Consolas', 8),
                      bg=BG2, fg=FG2).pack(side='left')
             _btn(row_h, "Usa", lambda p=h: self._set_hint_path(p),
-                 color='#3a3f5c').pack(side='left', padx=4)
+                 color=BTN).pack(side='left', padx=4)
 
         self.import_progress = ttk.Progressbar(f, mode='determinate')
         self.import_progress.pack(fill='x', padx=20, pady=4)
@@ -706,7 +704,7 @@ class IDUApp(tk.Tk):
                                      fg=FG, insertbackground=FG)
         self.doc_links_txt.pack(fill='x', padx=6, pady=4)
         _btn(lf, "↧ Precompila codici nuovi", self._doc_fill_links_template,
-             color='#3a3f5c').pack(anchor='w', padx=6, pady=(0, 4))
+             color=BTN).pack(anchor='w', padx=6, pady=(0, 4))
 
         row3 = tk.Frame(f, bg=BG2); row3.pack(fill='x', padx=20, pady=4)
         self.doc_carico_var = tk.BooleanVar(value=True)
@@ -2112,34 +2110,34 @@ class IDUApp(tk.Tk):
         style.configure('TNotebook.Tab', background=BG, foreground=FG2,
                         padding=[14, 7], font=FONT, borderwidth=0)
         style.map('TNotebook.Tab',
-                  background=[('selected', CARD), ('active', BG2)],
+                  background=[('selected', BG2), ('active', CARD)],
                   foreground=[('selected', ACCENT), ('active', FG)])
-        style.configure('Treeview', background=CARD, fieldbackground=CARD,
+        style.configure('Treeview', background=BG2, fieldbackground=BG2,
                         foreground=FG, rowheight=24, font=FONT_S,
                         borderwidth=0)
-        style.configure('Treeview.Heading', background=BG, foreground=FG2,
+        style.configure('Treeview.Heading', background=CARD, foreground=FG2,
                         font=FONT_B, relief='flat', padding=[6, 4])
         style.map('Treeview.Heading',
-                  background=[('active', BG2)],
+                  background=[('active', BG)],
                   foreground=[('active', FG)])
         style.map('Treeview',
                   background=[('selected', ACCENT)],
                   foreground=[('selected', 'white')])
-        style.configure('TProgressbar', troughcolor=BG, background=ACCENT2,
+        style.configure('TProgressbar', troughcolor=CARD, background=ACCENT2,
                         thickness=8, borderwidth=0)
-        style.configure('TCombobox', fieldbackground=CARD, background=CARD,
+        style.configure('TCombobox', fieldbackground=BG2, background=BG2,
                         foreground=FG, selectbackground=ACCENT,
-                        arrowcolor=FG2, bordercolor=CARD, lightcolor=CARD,
-                        darkcolor=CARD)
+                        arrowcolor=FG2, bordercolor='#d1d5db', lightcolor=BG2,
+                        darkcolor=BG2)
         style.map('TCombobox',
-                  fieldbackground=[('readonly', CARD)],
+                  fieldbackground=[('readonly', BG2)],
                   foreground=[('readonly', FG)])
         style.configure('Vertical.TScrollbar', background=CARD,
                         troughcolor=BG, bordercolor=BG,
                         arrowcolor=FG2, relief='flat')
-        style.map('Vertical.TScrollbar', background=[('active', '#3a3f5c')])
-        # Tendina dei combobox a tema scuro
-        self.option_add('*TCombobox*Listbox.background', CARD)
+        style.map('Vertical.TScrollbar', background=[('active', '#cbd5e1')])
+        # Tendina dei combobox (tema chiaro)
+        self.option_add('*TCombobox*Listbox.background', BG2)
         self.option_add('*TCombobox*Listbox.foreground', FG)
         self.option_add('*TCombobox*Listbox.selectBackground', ACCENT)
         self.option_add('*TCombobox*Listbox.selectForeground', 'white')
@@ -2161,7 +2159,7 @@ def _lighten(hexcolor: str, factor: float = 1.22) -> str:
 
 
 def _btn(parent, text, command, color=None):
-    color = color or '#3a3f5c'
+    color = color or BTN
     b = tk.Button(parent, text=text, command=command,
                   font=FONT_S, bg=color, fg='white',
                   relief='flat', padx=10, pady=4,
@@ -2176,8 +2174,8 @@ def _btn(parent, text, command, color=None):
 def _log_box(parent, height=7):
     box = scrolledtext.ScrolledText(
         parent, height=height, font=('Consolas', 9),
-        bg='#0d1117', fg='#58e06a', insertbackground='white',
-        state='normal', wrap='word'
+        bg='#f8fafc', fg='#166534', insertbackground=FG,
+        state='normal', wrap='word', relief='solid', bd=1
     )
     box.pack(fill='both', expand=True, padx=20, pady=4)
     return box

@@ -122,27 +122,6 @@ Il campo codice può essere sia il codice Mexal che il codice fornitore.
 
 **Per PDF:** estrazione automatica tramite pattern su ogni riga del documento.
 
-### 📦 Carico Magazzino
-Aggiorna le **giacenze** di magazzino (file `anpr_idu.csv`) a partire dalla merce
-entrata. Le quantità entranti si possono caricare da tre sorgenti:
-
-- **CSV** — colonne "codice" e "quantità" (i nomi sono configurabili)
-- **PDF** — bolla/DDT del fornitore (estrazione euristica codice + quantità)
-- **Manuale** — una riga per articolo: `CODICE  QUANTITÀ`
-
-Il codice può essere il **codice Mexal** dell'articolo **o il codice del fornitore**
-(viene risolto automaticamente all'articolo giusto).
-
-**Regola applicata:** `nuova giacenza = max(esistenza attuale, 0) + quantità entrante`
-— se l'esistenza è negativa viene prima azzerata, poi si aggiunge la merce.
-
-Flusso: scegli la sorgente → **🔍 Calcola anteprima** (vedi vecchia/entrante/nuova per
-ogni articolo) → **📤 Esporta anpr aggiornato** (crea un file nuovo, non tocca l'originale).
-
-> ⚠️ Le giacenze sono delicate: l'app scrive sempre un **file separato**. Fai una
-> **importazione di prova in Mexal** (o su azienda di test) e verifica i numeri
-> prima di usarlo sui dati reali.
-
 ### 📄 Ordine PDF
 Carica un PDF con elenco merce (codici Mexal + descrizioni).
 L'app trova ogni articolo nel database e mostra una tabella comparativa con:
