@@ -156,6 +156,41 @@ def portali_disponibili():
     return [dict(r) for r in rows]
 
 
+_BROWSER_OK = None
+
+
+def browser_disponibile():
+    """
+    Verifica (una sola volta, poi memorizza l'esito positivo) che il browser
+    Playwright sia installato e avviabile. Ritorna (ok: bool, messaggio: str).
+    Serve a NON fallire in silenzio: senza browser nessuna ricerca funziona.
+    """
+    global _BROWSER_OK
+    if _BROWSER_OK:
+        return True, ''
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return False, ("Playwright non installato. Esegui 'installa.bat' "
+                       "oppure: python -m playwright install chromium")
+    try:
+        pw = sync_playwright().start()
+        try:
+            b = pw.chromium.launch(headless=True)
+            b.close()
+        finally:
+            pw.stop()
+        _BROWSER_OK = True
+        return True, ''
+    except Exception as e:
+        m = str(e)
+        if "Executable doesn't exist" in m or "playwright install" in m:
+            return False, ("Browser Chromium di Playwright NON installato. "
+                           "Esegui 'installa.bat', oppure in un terminale nella "
+                           "cartella del programma:  python -m playwright install chromium")
+        return False, f"Impossibile avviare il browser: {m}"
+
+
 # ─── Ricerca massiva: split per portale (in parallelo) + merge ──────────────
 
 def _articoli_per_portale(article_ids, portal_ids, only_missing_code):
@@ -205,6 +240,13 @@ def search_batch(articoli, fornitore_ids=None, only_missing_code=False,
     only_missing_code: True = salta i link che hanno già il codice fornitore.
     """
     import threading
+
+    # 0) Il browser è installato? Senza, nessuna ricerca funziona → dillo chiaro.
+    ok, msg = browser_disponibile()
+    if not ok:
+        if log_cb:
+            log_cb(f"❌ {msg}")
+        return []
 
     # 1) Portali bersaglio (solo quelli con credenziali configurate)
     portali = portali_disponibili()
