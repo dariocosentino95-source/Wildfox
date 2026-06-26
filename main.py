@@ -1642,6 +1642,7 @@ class IDUApp(tk.Tk):
         _btn(rs, "☑ Tutti", self._batch_select_all, color=BTN).pack(side='left')
         _btn(rs, "☐ Nessuno", self._batch_deselect_all, color=BTN).pack(side='left', padx=6)
         _btn(rs, "💾 Salva selezionati", self._save_batch_results, color=ACCENT).pack(side='left', padx=6)
+        _btn(rs, "🖨 PDF confronto", self._export_pdf_confronto, color=WARN).pack(side='left', padx=6)
         self._batch_count_var = tk.StringVar(value='')
         tk.Label(rs, textvariable=self._batch_count_var, font=FONT_S, bg=BG2, fg=FG2).pack(side='left', padx=10)
 
@@ -1797,6 +1798,59 @@ class IDUApp(tk.Tk):
                 logger.exception("Save batch results")
 
         _th.Thread(target=_task, daemon=True).start()
+
+    def _export_pdf_confronto(self):
+        import threading as _th
+        import report
+        scope = self._batch_scope_map.get(self.batch_scope_cb.get(), 'tutti')
+        keyword = self.batch_keyword_var.get().strip()
+        if scope in ('categoria', 'singolo') and not keyword:
+            messagebox.showwarning(
+                "Manca la parola",
+                "Per l'ambito scelto inserisci una parola (categoria) o un codice articolo.")
+            return
+        lim_raw = self.batch_limite_var.get().strip()
+        limite = int(lim_raw) if lim_raw.isdigit() else None
+
+        ids = report.select_article_ids(scope, keyword, limite)
+        if not ids:
+            messagebox.showinfo(
+                "Nessun dato",
+                "Nessun articolo con prezzi fornitore da confrontare per questo ambito.\n"
+                "Suggerimento: fai prima una ricerca o un'importazione che popoli i prezzi.")
+            return
+        if len(ids) > 300 and not messagebox.askyesno(
+                "Conferma",
+                f"Il PDF conterrà {len(ids)} articoli (molte pagine). Continuare?"):
+            return
+
+        default = f"confronto_{(keyword or scope)}.pdf".replace(' ', '_')
+        path = filedialog.asksaveasfilename(
+            title="Salva PDF confronto fornitori", defaultextension=".pdf",
+            initialfile=default, filetypes=[("PDF", "*.pdf")])
+        if not path:
+            return
+
+        def _task():
+            try:
+                st = report.genera_pdf_confronto(
+                    scope, keyword, path, limite=limite,
+                    log_cb=lambda m: self._log(self.batch_log, m))
+                self._set_status(f"PDF confronto creato: {st['n_articoli']} articoli.")
+                self.after(0, lambda: self._offer_open_pdf(path))
+            except Exception as e:
+                self._log(self.batch_log, f"❌ Errore PDF: {e}")
+                logger.exception("PDF confronto")
+
+        _th.Thread(target=_task, daemon=True).start()
+
+    def _offer_open_pdf(self, path):
+        if messagebox.askyesno("PDF creato",
+                               f"PDF salvato in:\n{path}\n\nVuoi aprirlo ora?"):
+            try:
+                os.startfile(path)   # Windows
+            except Exception as e:
+                self._log(self.batch_log, f"Impossibile aprire il PDF: {e}")
 
     def _stop_batch_search(self):
         ev = getattr(self, '_batch_stop_event', None)
