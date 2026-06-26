@@ -1608,6 +1608,11 @@ class IDUApp(tk.Tk):
         self._batch_start_btn.pack(side='left')
         self._batch_stop_btn = _btn(rb, "⏹ Stop", self._stop_batch_search, color=DANGER)
         self._batch_stop_btn.pack(side='left', padx=8)
+        self.batch_parallel_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(rb, text="⚡ Parallelo", variable=self.batch_parallel_var,
+                       font=FONT_S, bg=BG2, fg=FG, selectcolor=CARD,
+                       activebackground=BG2, activeforeground=FG,
+                       bd=0, highlightthickness=0).pack(side='left', padx=(8, 0))
         self.batch_progress = ttk.Progressbar(rb, mode='determinate')
         self.batch_progress.pack(side='left', fill='x', expand=True, padx=8)
 
@@ -1697,7 +1702,8 @@ class IDUApp(tk.Tk):
                     fornitore_ids=[fid] if fid else None,
                     only_missing_code=only_missing,
                     progress_cb=prog, log_cb=log,
-                    stop_event=self._batch_stop_event)
+                    stop_event=self._batch_stop_event,
+                    parallel=self.batch_parallel_var.get())
                 self.after(0, lambda: self._fill_batch_results(risultati))
                 self._set_progress(self.batch_progress, 100)
                 self._set_status(f"Ricerca terminata: {len(risultati)} risultati.")

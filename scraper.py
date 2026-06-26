@@ -156,69 +156,149 @@ def portali_disponibili():
     return [dict(r) for r in rows]
 
 
-# ─── Ricerca massiva con browser riusato (NON salva: ritorna i risultati) ───
+# ─── Ricerca massiva: split per portale (in parallelo) + merge ──────────────
+
+def _articoli_per_portale(article_ids, portal_ids, only_missing_code):
+    """
+    Per ciascun portale, il sottoinsieme di `article_ids` ad esso collegati
+    (rispettando il filtro 'solo dove manca il codice'). Mantiene l'ordine
+    di `article_ids`. Una sola query (a blocchi) invece di una per articolo.
+    """
+    per = {pid: [] for pid in portal_ids}
+    if not article_ids or not portal_ids:
+        return per
+    cond = ("AND (codice_fornitore IS NULL OR codice_fornitore='')"
+            if only_missing_code else "")
+    ph_p = ','.join('?' * len(portal_ids))
+    linked = {pid: set() for pid in portal_ids}
+    conn = db.get_connection()
+    try:
+        for start in range(0, len(article_ids), 400):
+            chunk = article_ids[start:start + 400]
+            ph_a = ','.join('?' * len(chunk))
+            for r in conn.execute(
+                f"""SELECT DISTINCT articolo_id, fornitore_id
+                    FROM articolo_fornitore
+                    WHERE fornitore_id IN ({ph_p})
+                      AND articolo_id IN ({ph_a}) {cond}""",
+                    list(portal_ids) + list(chunk)):
+                linked[r['fornitore_id']].add(r['articolo_id'])
+    finally:
+        conn.close()
+    return {pid: [aid for aid in article_ids if aid in linked[pid]]
+            for pid in portal_ids}
+
 
 def search_batch(articoli, fornitore_ids=None, only_missing_code=False,
-                 progress_cb=None, log_cb=None, stop_event=None):
+                 progress_cb=None, log_cb=None, stop_event=None, parallel=True):
     """
-    Cerca codici/prezzi per la lista `articoli` riusando UN SOLO browser per
-    tutta la sessione. NON salva nel database: ritorna la lista dei risultati
-    (da mostrare in tabella e salvare in modo selettivo con `save_results`).
+    Cerca codici/prezzi per la lista `articoli`. NON salva nel database:
+    ritorna i risultati (da rivedere in tabella e salvare con `save_results`).
 
-    fornitore_ids: se passato, cerca solo su questi fornitori; altrimenti su
-                   tutti i portali collegati all'articolo.
+    Strategia: la ricerca è SPLITTATA per portale; i portali girano IN
+    PARALLELO, ciascuno con il proprio browser (un login per portale), e i
+    risultati vengono poi FUSI. Così "tutti gli articoli × tutti i fornitori"
+    non procede in fila ma in contemporanea. Con `parallel=False` i portali
+    vanno in sequenza (un thread alla volta).
+
+    fornitore_ids: limita ai portali indicati; None = tutti i portali.
     only_missing_code: True = salta i link che hanno già il codice fornitore.
     """
-    from playwright.sync_api import sync_playwright
+    import threading
 
-    if log_cb:
-        # Avvisa subito sui portali senza credenziali (verrebbero saltati).
-        for p in portali_disponibili():
-            if _creds(p['id']).get('username'):
+    # 1) Portali bersaglio (solo quelli con credenziali configurate)
+    portali = portali_disponibili()
+    if fornitore_ids:
+        sset = set(fornitore_ids)
+        portali = [p for p in portali if p['id'] in sset]
+    usable = []
+    for p in portali:
+        if _creds(p['id']).get('username'):
+            usable.append(p)
+            if log_cb:
                 log_cb(f"🔐 {p['nome']}: credenziali OK")
-            else:
-                log_cb(f"⚠ {p['nome']}: credenziali MANCANTI → saltato "
-                       f"(configurale in 'Credenziali Portali').")
-        log_cb(f"Articoli da elaborare: {len(articoli)}")
+        elif log_cb:
+            log_cb(f"⚠ {p['nome']}: credenziali MANCANTI → saltato "
+                   f"(configurale in 'Credenziali Portali').")
+    if not usable:
+        if log_cb:
+            log_cb("Nessun portale utilizzabile (credenziali mancanti).")
+        return []
 
+    # 2) Lista articoli per ciascun portale (una query, a blocchi)
+    art_by_id = {a['id']: a for a in articoli}
+    per_portal = _articoli_per_portale(
+        [a['id'] for a in articoli], [p['id'] for p in usable], only_missing_code)
+    totale = sum(len(v) for v in per_portal.values())
+    if log_cb:
+        log_cb(f"Ricerche totali: {totale} su {len(usable)} portali "
+               f"({'in parallelo' if parallel else 'in sequenza'}).")
+    if not totale:
+        return []
+
+    # 3) Un worker (un browser) per portale
+    lock = threading.Lock()
+    state = {'done': 0}
     risultati = []
-    totale = len(articoli)
-    pw = sync_playwright().start()
-    try:
-        browser = pw.chromium.launch(headless=True)
-        try:
-            for idx, art in enumerate(articoli):
-                if stop_event is not None and stop_event.is_set():
-                    if log_cb:
-                        log_cb(f"\n⏹ Interrotto dall'utente dopo {idx} articoli.")
-                    break
-                if progress_cb:
-                    progress_cb(idx + 1, totale, art['codice'])
-                try:
-                    res_list = search_article_on_portals(
-                        art['id'], shared_browser=browser,
-                        fornitore_ids=fornitore_ids,
-                        only_missing_code=only_missing_code)
-                except Exception as e:
-                    logger.warning(f"Errore su articolo {art['codice']}: {e}")
-                    res_list = []
-                for res in res_list:
-                    res['articolo_id'] = art['id']
-                    res['articolo_codice'] = art['codice']
-                    res['articolo_descr'] = art.get('descrizione', '')
-                    risultati.append(res)
-                if log_cb and (idx + 1) % 10 == 0:
-                    n_pr = sum(1 for r in risultati if r.get('prezzo'))
-                    log_cb(f"  …{idx+1}/{totale} elaborati, "
-                           f"{len(risultati)} risultati ({n_pr} con prezzo).")
-        finally:
-            browser.close()
-    finally:
-        pw.stop()
 
+    def _worker(pid, pnome, art_ids):
+        from playwright.sync_api import sync_playwright
+        local = []
+        pw = sync_playwright().start()
+        try:
+            browser = pw.chromium.launch(headless=True)
+            try:
+                for aid in art_ids:
+                    if stop_event is not None and stop_event.is_set():
+                        break
+                    try:
+                        rs = search_article_on_portals(
+                            aid, shared_browser=browser, fornitore_ids=[pid],
+                            only_missing_code=only_missing_code)
+                    except Exception as e:
+                        logger.warning(f"[{pnome}] articolo {aid}: {e}")
+                        rs = []
+                    a = art_by_id.get(aid, {})
+                    for res in rs:
+                        res['articolo_id'] = aid
+                        res['articolo_codice'] = a.get('codice', '')
+                        res['articolo_descr'] = a.get('descrizione', '')
+                        local.append(res)
+                    with lock:
+                        state['done'] += 1
+                        if progress_cb:
+                            progress_cb(state['done'], totale,
+                                        f"{pnome}: {a.get('codice','')}")
+            finally:
+                browser.close()
+        finally:
+            pw.stop()
+        with lock:
+            risultati.extend(local)
+            if log_cb:
+                n_pr = sum(1 for r in local if r.get('prezzo'))
+                log_cb(f"  ✓ {pnome}: {len(local)} risultati ({n_pr} con prezzo).")
+
+    threads = [threading.Thread(
+        target=_worker, args=(p['id'], p['nome'], per_portal.get(p['id'], [])),
+        daemon=True) for p in usable]
+    if parallel:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    else:
+        for t in threads:
+            t.start()
+            t.join()
+
+    # 4) Merge ordinato per codice articolo
+    risultati.sort(key=lambda r: r.get('articolo_codice', ''))
     if log_cb:
         n_pr = sum(1 for r in risultati if r.get('prezzo'))
-        log_cb(f"\n✅ Ricerca completata: {len(risultati)} risultati "
+        nota = (" (interrotto)" if stop_event is not None and stop_event.is_set()
+                else "")
+        log_cb(f"\n✅ Ricerca completata{nota}: {len(risultati)} risultati "
                f"({n_pr} con prezzo). Rivedi la tabella e salva.")
     return risultati
 
