@@ -81,10 +81,15 @@ def process_pdf_listino(pdf_path: str, fornitore_id: int,
     if formato == 'auto':
         formato = _detect_pdf_format(pdf_path)
 
-    if formato == 'cardinale':
-        articoli = _parse_cardinale_pdf(pdf_path, progress_cb)
-    else:
-        articoli = _parse_generic_pdf(pdf_path, progress_cb)
+    _parsers = {
+        'cardinale': _parse_cardinale_pdf,
+        'grafica': _parse_grafica_pdf,
+        'spolzino': _parse_grafica_pdf,
+        'emcidi': _parse_emcidi_pdf,
+        'idroferrara': _parse_idroferrara_pdf,
+        'bonardi': _parse_bonardi_pdf,
+    }
+    articoli = _parsers.get(formato, _parse_generic_pdf)(pdf_path, progress_cb)
 
     # Applica gli aggiornamenti
     results = []
@@ -112,6 +117,14 @@ def _detect_pdf_format(pdf_path: str) -> str:
     try:
         with pdfplumber.open(pdf_path) as pdf:
             text = (pdf.pages[0].extract_text() or '').lower()
+            # Fornitori specifici PRIMA dei marcatori generici: Idro Ferrara
+            # usa anche "Conferma d'ordine" (che è anche un marcatore Cardinale).
+            if 'idro ferrara' in text or 'idroferrara' in text:
+                return 'idroferrara'
+            if 'bonardi' in text:
+                return 'bonardi'
+            if 'em.ci.di' in text or 'finocchiaro' in text:
+                return 'emcidi'
             # Marcatori tipici Cardinale
             if 'cardinale' in text or "conferma d'ordine" in text or \
                re.search(r'\*[a-z0-9]+\*', text):
@@ -277,6 +290,92 @@ def _parse_emcidi_pdf(pdf_path: str, progress_cb=None):
                     'prezzo_lordo': lordo,
                     'prezzo_netto': unit_netto,   # unitario netto
                     'sconto': mb.group(4) or None,
+                })
+            if progress_cb:
+                progress_cb(p_idx + 1, total)
+    return results
+
+
+def _parse_idroferrara_pdf(pdf_path: str, progress_cb=None):
+    """
+    Parser per le conferme d'ordine / DDT Idro Ferrara S.r.l. UNA riga per
+    articolo (la descrizione può continuare sulle righe successive, ignorate):
+        CODICE  DESCRIZIONE...  QTApz  € PREZZO_LORDO  [SCONTO%]  € IMPORTO  IVA
+    Es: '70001.1216 RACC. DRITTO MASCHIO 1/2x16 ... 100pz € 1,450 5% € 137,75 22'
+    Il simbolo € può comparire come carattere illeggibile: viene ignorato.
+    Prezzo unitario netto = PREZZO_LORDO × (1 − sconto%).
+    """
+    import pdfplumber
+    line_re = re.compile(
+        r'^(?P<cod>[A-Za-z0-9][\w./\-]*)\s+.*?\b(?P<qta>\d+)\s*pz\b\s+(?P<tail>.+)$')
+
+    def _num(s):
+        return float(s.replace('.', '').replace(',', '.'))
+
+    results = []
+    with pdfplumber.open(pdf_path) as pdf:
+        total = len(pdf.pages)
+        for p_idx, page in enumerate(pdf.pages):
+            for line in (page.extract_text() or '').splitlines():
+                m = line_re.match(line.strip())
+                if not m:
+                    continue
+                tail = m.group('tail')
+                decs = re.findall(r'\d{1,3}(?:\.\d{3})*,\d{2,4}', tail)
+                if not decs:
+                    continue
+                sc = re.search(r'(\d{1,2})\s*%', tail)
+                sconto = int(sc.group(1)) if sc else 0
+                lordo = _num(decs[0])
+                netto = round(lordo * (1 - sconto / 100), 4)
+                results.append({
+                    'codice': m.group('cod'),
+                    'qta': int(m.group('qta')),
+                    'prezzo_lordo': lordo,
+                    'prezzo_netto': netto,
+                    'sconto': f"{sconto}%" if sconto else None,
+                })
+            if progress_cb:
+                progress_cb(p_idx + 1, total)
+    return results
+
+
+def _parse_bonardi_pdf(pdf_path: str, progress_cb=None):
+    """
+    Parser per le fatture accompagnatorie Idraulica sas di Bonardi. UNA riga per
+    articolo (la descrizione può continuare sulle righe successive, ignorate):
+        CODICE  DESCRIZIONE...  UM  QTA  PREZZO_LISTINO  [SC.%]  PREZZO_UNITARIO  TOTALE  C.IVA
+    Es: '098.0146 VALVOLA SFERA ... NR 30,00 4,9664 50+5 2,35 70,77 22'
+        '098.0441/T-ONE MISCELATORE ... NR 9,00 18,2000 18,20 163,80 22'  (sconto assente)
+    Lo sconto può essere composto (es. '50+5'). Il PREZZO_UNITARIO è GIÀ il netto.
+    """
+    import pdfplumber
+    line_re = re.compile(
+        r'^(?P<cod>\S+)\s+.+?\s+'
+        r'(?P<qta>\d{1,3}(?:\.\d{3})*,\d{2})\s+'
+        r'(?P<listino>\d{1,3}(?:\.\d{3})*,\d{2,4})\s+'
+        r'(?:(?P<sconto>\d{1,2}(?:\+\d{1,2})*)\s+)?'
+        r'(?P<unit>\d{1,3}(?:\.\d{3})*,\d{2,4})\s+'
+        r'(?P<tot>\d{1,3}(?:\.\d{3})*,\d{2})\s+'
+        r'(?P<civa>\d{1,2})\s*$')
+
+    def _num(s):
+        return float(s.replace('.', '').replace(',', '.'))
+
+    results = []
+    with pdfplumber.open(pdf_path) as pdf:
+        total = len(pdf.pages)
+        for p_idx, page in enumerate(pdf.pages):
+            for line in (page.extract_text() or '').splitlines():
+                m = line_re.match(line.strip())
+                if not m:
+                    continue
+                results.append({
+                    'codice': m.group('cod'),
+                    'qta': _num(m.group('qta')),
+                    'prezzo_lordo': _num(m.group('listino')),
+                    'prezzo_netto': _num(m.group('unit')),   # già netto
+                    'sconto': m.group('sconto'),
                 })
             if progress_cb:
                 progress_cb(p_idx + 1, total)

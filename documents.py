@@ -14,10 +14,13 @@ import carico
 
 logger = logging.getLogger(__name__)
 
-# Mappa parola-chiave del documento → codice Mexal del fornitore (auto-rilevamento).
-# (Aggiungere IdroFerrara / Bonardi quando si vedono i loro documenti.)
+# Mappa formato documento (rilevato dal testo) → codice Mexal del fornitore
+# (auto-rilevamento). Vale per i fornitori riconoscibili dal contenuto del PDF.
 FORMATO_FORNITORE = {
     'cardinale': '60100759',
+    'idroferrara': 'IDROFERRARA',   # Idro Ferrara S.r.l.
+    'bonardi': '60100006',          # Idraulica sas di Bonardi
+    'emcidi': '60100034',           # EM.CI.DI Finocchiaro
 }
 
 # Mappa codice Mexal fornitore → formato del documento. Usato quando il fornitore
@@ -25,9 +28,11 @@ FORMATO_FORNITORE = {
 # Il formato "grafica" è condiviso da più fornitori che usano lo stesso gestionale.
 FORMATO_PER_CODICE = {
     '60100759': 'cardinale',
-    '60100001': 'grafica',   # Spolzino
-    '60100830': 'grafica',   # Aqualif
-    '60100034': 'emcidi',    # EM.CI.DI Finocchiaro
+    '60100001': 'grafica',     # Spolzino
+    '60100830': 'grafica',     # Aqualif
+    '60100034': 'emcidi',      # EM.CI.DI Finocchiaro
+    'IDROFERRARA': 'idroferrara',
+    '60100006': 'bonardi',     # Idraulica Bonardi
 }
 
 
@@ -66,6 +71,10 @@ def parse_items(pdf_path: str, formato: str = 'auto'):
         return price_engine._parse_grafica_pdf(pdf_path)
     if formato == 'emcidi':
         return price_engine._parse_emcidi_pdf(pdf_path)
+    if formato == 'idroferrara':
+        return price_engine._parse_idroferrara_pdf(pdf_path)
+    if formato == 'bonardi':
+        return price_engine._parse_bonardi_pdf(pdf_path)
     return price_engine._parse_generic_pdf(pdf_path)
 
 
