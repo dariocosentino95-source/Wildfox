@@ -1549,94 +1549,246 @@ class IDUApp(tk.Tk):
 
     def _build_tab_batch(self):
         f = self.tab_batch
-        _section(f, "🚀 Ricerca massiva su TUTTI gli articoli")
+        _section(f, "🚀 Ricerca prezzi sui portali")
         tk.Label(f, text=(
-            "Cerca automaticamente su tutti i portali fornitore per molti articoli in sequenza\n"
-            "e salva i codici e i prezzi trovati nel database man mano.\n"
-            "Prerequisiti: URL portale nel tab 'Fornitori' e credenziali nel tab "
-            "'Credenziali Portali'."
+            "Scegli l'ambito (singolo articolo, categoria/parola, o tutti) e i fornitori, "
+            "poi premi Cerca. I risultati appaiono in tabella: rivedi e salva quelli giusti.\n"
+            "Prerequisiti: URL portale nel tab 'Fornitori' e credenziali nel tab 'Credenziali Portali'."
         ), font=FONT_S, bg=BG2, fg=FG2, justify='left').pack(padx=20, pady=2, anchor='w')
 
-        batch_row = tk.Frame(f, bg=BG2)
-        batch_row.pack(fill='x', padx=20, pady=6)
-        tk.Label(batch_row, text="Quali articoli:", font=FONT_S, bg=BG2, fg=FG).pack(side='left')
-        self.batch_filtro_var = tk.StringVar(value='senza_codice')
-        filtro_opts = [
-            ('Solo dove manca il codice fornitore (consigliato)', 'senza_codice'),
-            ('Tutti gli articoli con almeno un fornitore', 'con_fornitore'),
-            ('Tutti gli articoli (lentissimo)', 'tutti'),
-        ]
-        self.batch_filtro_cb = ttk.Combobox(
-            batch_row, state='readonly', width=42,
-            values=[o[0] for o in filtro_opts])
-        self.batch_filtro_cb.current(0)
-        self.batch_filtro_cb.pack(side='left', padx=8)
-        self._batch_filtro_map = {o[0]: o[1] for o in filtro_opts}
+        # ── Riga 1: ambito + parola/codice ──
+        r1 = tk.Frame(f, bg=BG2); r1.pack(fill='x', padx=20, pady=(8, 2))
+        tk.Label(r1, text="Ambito:", font=FONT_S, bg=BG2, fg=FG).pack(side='left')
+        self._batch_scope_map = {
+            'Tutti gli articoli': 'tutti',
+            'Per categoria / parola (es. ottone)': 'categoria',
+            'Singolo articolo (per codice)': 'singolo',
+        }
+        self.batch_scope_cb = ttk.Combobox(
+            r1, state='readonly', width=34, values=list(self._batch_scope_map))
+        self.batch_scope_cb.current(0)
+        self.batch_scope_cb.pack(side='left', padx=8)
+        tk.Label(r1, text="Parola / codice:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(12, 2))
+        self.batch_keyword_var = tk.StringVar()
+        tk.Entry(r1, textvariable=self.batch_keyword_var, font=FONT_S,
+                 bg=CARD, fg=FG, insertbackground=FG, width=22).pack(side='left')
 
-        tk.Label(batch_row, text="Max articoli:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(12,2))
+        # ── Riga 2: fornitore + cosa aggiornare + limite ──
+        r2 = tk.Frame(f, bg=BG2); r2.pack(fill='x', padx=20, pady=2)
+        tk.Label(r2, text="Fornitore:", font=FONT_S, bg=BG2, fg=FG).pack(side='left')
+        self._batch_forn_map = {'Tutti i portali': None}
+        try:
+            for p in scraper.portali_disponibili():
+                self._batch_forn_map[p['nome']] = p['id']
+        except Exception:
+            pass
+        self.batch_forn_cb = ttk.Combobox(
+            r2, state='readonly', width=20, values=list(self._batch_forn_map))
+        self.batch_forn_cb.current(0)
+        self.batch_forn_cb.pack(side='left', padx=8)
+
+        self._batch_missing_map = {
+            'Solo dove manca il codice fornitore': True,
+            'Aggiorna anche dove il codice c\'è già': False,
+        }
+        self.batch_missing_cb = ttk.Combobox(
+            r2, state='readonly', width=34, values=list(self._batch_missing_map))
+        self.batch_missing_cb.current(0)
+        self.batch_missing_cb.pack(side='left', padx=8)
+
+        tk.Label(r2, text="Max:", font=FONT_S, bg=BG2, fg=FG).pack(side='left', padx=(12, 2))
         self.batch_limite_var = tk.StringVar(value='50')
-        tk.Entry(batch_row, textvariable=self.batch_limite_var,
-                 font=FONT_S, bg=CARD, fg=FG, insertbackground=FG, width=6
-                 ).pack(side='left')
-        tk.Label(batch_row, text="(vuoto = tutti)", font=FONT_S, bg=BG2, fg=FG2).pack(side='left', padx=4)
+        tk.Entry(r2, textvariable=self.batch_limite_var, font=FONT_S,
+                 bg=CARD, fg=FG, insertbackground=FG, width=6).pack(side='left')
+        tk.Label(r2, text="(vuoto = tutti)", font=FONT_S, bg=BG2, fg=FG2).pack(side='left', padx=4)
 
-        batch_btn_row = tk.Frame(f, bg=BG2)
-        batch_btn_row.pack(fill='x', padx=20, pady=4)
-        self._batch_start_btn = _btn(batch_btn_row, "🚀 Avvia ricerca massiva",
-                                     self._run_batch_search, color=ACCENT2)
+        # ── Riga pulsanti ──
+        rb = tk.Frame(f, bg=BG2); rb.pack(fill='x', padx=20, pady=6)
+        self._batch_start_btn = _btn(rb, "🔍 Cerca", self._run_batch_search, color=ACCENT2)
         self._batch_start_btn.pack(side='left')
-        self._batch_stop_btn = _btn(batch_btn_row, "⏹ Stop",
-                                    self._stop_batch_search, color=DANGER)
+        self._batch_stop_btn = _btn(rb, "⏹ Stop", self._stop_batch_search, color=DANGER)
         self._batch_stop_btn.pack(side='left', padx=8)
+        self.batch_progress = ttk.Progressbar(rb, mode='determinate')
+        self.batch_progress.pack(side='left', fill='x', expand=True, padx=8)
 
-        self.batch_progress = ttk.Progressbar(f, mode='determinate')
-        self.batch_progress.pack(fill='x', padx=20, pady=4)
-        self.batch_log = _log_box(f, height=8)
+        # ── Tabella risultati ──
+        tframe = tk.Frame(f, bg=BG2)
+        tframe.pack(fill='both', expand=True, padx=20, pady=4)
+        cols = ('sel', 'art', 'descr', 'forn', 'cod', 'prezzo', 'stato')
+        hdrs = ('', 'Articolo', 'Descrizione', 'Fornitore', 'Cod. trovato', 'Prezzo', 'Stato')
+        wids = (34, 110, 250, 120, 120, 80, 110)
+        sb = ttk.Scrollbar(tframe, orient='vertical')
+        self.batch_tree = ttk.Treeview(tframe, columns=cols, show='headings',
+                                       height=10, yscrollcommand=sb.set)
+        sb.config(command=self.batch_tree.yview)
+        for c, h, w in zip(cols, hdrs, wids):
+            self.batch_tree.heading(c, text=h)
+            self.batch_tree.column(c, width=w, anchor=('center' if c in ('sel', 'prezzo') else 'w'),
+                                   stretch=(c == 'descr'))
+        self.batch_tree.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        self.batch_tree.tag_configure('oddrow', background=ROW_ALT)
+        self.batch_tree.bind('<Button-1>', self._batch_on_click)
+        self._batch_results = {}   # iid -> dict risultato
+        self._batch_checked = set()
+
+        # ── Riga salvataggio ──
+        rs = tk.Frame(f, bg=BG2); rs.pack(fill='x', padx=20, pady=4)
+        _btn(rs, "☑ Tutti", self._batch_select_all, color=BTN).pack(side='left')
+        _btn(rs, "☐ Nessuno", self._batch_deselect_all, color=BTN).pack(side='left', padx=6)
+        _btn(rs, "💾 Salva selezionati", self._save_batch_results, color=ACCENT).pack(side='left', padx=6)
+        self._batch_count_var = tk.StringVar(value='')
+        tk.Label(rs, textvariable=self._batch_count_var, font=FONT_S, bg=BG2, fg=FG2).pack(side='left', padx=10)
+
+        self.batch_log = _log_box(f, height=5)
+
+    # ── Ricerca massiva: azioni ──
 
     def _run_batch_search(self):
         import threading as _th
-        # Determina filtro e limite
-        filtro = self._batch_filtro_map.get(
-            self.batch_filtro_cb.get(), 'senza_codice')
+        scope = self._batch_scope_map.get(self.batch_scope_cb.get(), 'tutti')
+        keyword = self.batch_keyword_var.get().strip()
+        fid = self._batch_forn_map.get(self.batch_forn_cb.get())
+        only_missing = self._batch_missing_map.get(self.batch_missing_cb.get(), True)
         lim_raw = self.batch_limite_var.get().strip()
         limite = int(lim_raw) if lim_raw.isdigit() else None
 
-        # Avviso se molti articoli
-        if limite is None or limite > 200:
+        if scope in ('categoria', 'singolo') and not keyword:
+            messagebox.showwarning(
+                "Manca la parola",
+                "Per l'ambito scelto inserisci una parola (categoria) o un codice articolo.")
+            return
+
+        articoli = scraper.select_target_articoli(
+            scope=scope, keyword=keyword, fornitore_id=fid,
+            solo_senza_codice=only_missing, limite=limite)
+        if not articoli:
+            messagebox.showinfo("Nessun articolo",
+                                "Nessun articolo corrisponde ai criteri scelti.")
+            return
+        if len(articoli) > 200:
             if not messagebox.askyesno(
                 "Conferma",
-                "Stai per avviare una ricerca su molti articoli.\n"
-                "Potrebbe richiedere parecchio tempo (apre un browser per ogni portale).\n\n"
-                "Puoi premere Stop in qualsiasi momento. Continuare?"):
+                f"Stai per cercare su {len(articoli)} articoli. "
+                "Può richiedere parecchio tempo.\nPuoi premere Stop in qualsiasi momento. Continuare?"):
                 return
 
+        # reset tabella
+        self.batch_tree.delete(*self.batch_tree.get_children())
+        self._batch_results.clear()
+        self._batch_checked.clear()
+        self._batch_count_var.set('')
         self.batch_log.delete('1.0', 'end')
         self.batch_progress['value'] = 0
         self._batch_stop_event = _th.Event()
+        self._batch_start_btn.config(state='disabled')
 
         def _task():
             def prog(i, tot, desc=''):
-                pct = int(i / tot * 100) if tot else 0
-                self._set_progress(self.batch_progress, pct)
-                self._set_status(f"Ricerca massiva: {i}/{tot} — {desc}")
+                self._set_progress(self.batch_progress, int(i / tot * 100) if tot else 0)
+                self._set_status(f"Ricerca: {i}/{tot} — {desc}")
 
             def log(msg):
                 self._log(self.batch_log, msg)
 
             try:
-                scraper.search_all_articles_on_portals(
-                    filtro=filtro,
-                    progress_cb=prog,
-                    log_cb=log,
-                    stop_event=self._batch_stop_event,
-                    salva=True,
-                    limite=limite,
-                )
+                risultati = scraper.search_batch(
+                    articoli,
+                    fornitore_ids=[fid] if fid else None,
+                    only_missing_code=only_missing,
+                    progress_cb=prog, log_cb=log,
+                    stop_event=self._batch_stop_event)
+                self.after(0, lambda: self._fill_batch_results(risultati))
                 self._set_progress(self.batch_progress, 100)
-                self._set_status("Ricerca massiva terminata.")
+                self._set_status(f"Ricerca terminata: {len(risultati)} risultati.")
             except Exception as e:
                 self._log(self.batch_log, f"❌ Errore: {e}")
                 logger.exception("Batch search")
+            finally:
+                self.after(0, lambda: self._batch_start_btn.config(state='normal'))
+
+        _th.Thread(target=_task, daemon=True).start()
+
+    def _fill_batch_results(self, risultati):
+        self.batch_tree.delete(*self.batch_tree.get_children())
+        self._batch_results.clear()
+        self._batch_checked.clear()
+        stato_lbl = {'prezzo': '💶 prezzo', 'solo_codice': '🔖 solo codice', 'vuoto': '—'}
+        for i, res in enumerate(risultati):
+            iid = str(i)
+            prezzo = res.get('prezzo')
+            prezzo_s = (f"{prezzo:.4f}".rstrip('0').rstrip('.') if prezzo else '—')
+            descr = (res.get('articolo_descr') or '')[:48]
+            tags = ('oddrow',) if i % 2 else ()
+            self.batch_tree.insert(
+                '', 'end', iid=iid, tags=tags,
+                values=('☑', res.get('articolo_codice', ''), descr,
+                        res.get('fornitore_nome', ''), res.get('codice_trovato') or '—',
+                        prezzo_s, stato_lbl.get(res.get('stato'), '—')))
+            self._batch_results[iid] = res
+            self._batch_checked.add(iid)
+        self._update_batch_count()
+        if not risultati:
+            self._log(self.batch_log, "Nessun risultato trovato.")
+
+    def _batch_on_click(self, event):
+        # Toggle del check se si clicca sulla prima colonna
+        if self.batch_tree.identify_region(event.x, event.y) != 'cell':
+            return
+        if self.batch_tree.identify_column(event.x) != '#1':
+            return
+        iid = self.batch_tree.identify_row(event.y)
+        if not iid:
+            return
+        if iid in self._batch_checked:
+            self._batch_checked.discard(iid)
+            self.batch_tree.set(iid, 'sel', '☐')
+        else:
+            self._batch_checked.add(iid)
+            self.batch_tree.set(iid, 'sel', '☑')
+        self._update_batch_count()
+
+    def _batch_select_all(self):
+        for iid in self.batch_tree.get_children():
+            self._batch_checked.add(iid)
+            self.batch_tree.set(iid, 'sel', '☑')
+        self._update_batch_count()
+
+    def _batch_deselect_all(self):
+        for iid in self.batch_tree.get_children():
+            self.batch_tree.set(iid, 'sel', '☐')
+        self._batch_checked.clear()
+        self._update_batch_count()
+
+    def _update_batch_count(self):
+        tot = len(self._batch_results)
+        sel = len(self._batch_checked)
+        self._batch_count_var.set(f"{sel}/{tot} selezionati" if tot else '')
+
+    def _save_batch_results(self):
+        import threading as _th
+        selez = [self._batch_results[iid] for iid in self._batch_checked
+                 if iid in self._batch_results]
+        if not selez:
+            messagebox.showinfo("Niente da salvare",
+                                "Seleziona almeno una riga (clic sulla casella ☑).")
+            return
+        if not messagebox.askyesno(
+            "Conferma salvataggio",
+            f"Salvo codice fornitore e prezzo per {len(selez)} righe selezionate nel database?"):
+            return
+
+        def _task():
+            try:
+                n = scraper.save_results(selez)
+                self._log(self.batch_log, f"💾 Salvati {n} risultati nel database.")
+                self._set_status(f"Salvati {n} risultati.")
+                # marca le righe salvate
+                for iid in list(self._batch_checked):
+                    self.after(0, lambda i=iid: self.batch_tree.set(i, 'stato', '✅ salvato'))
+            except Exception as e:
+                self._log(self.batch_log, f"❌ Errore salvataggio: {e}")
+                logger.exception("Save batch results")
 
         _th.Thread(target=_task, daemon=True).start()
 
@@ -1644,7 +1796,7 @@ class IDUApp(tk.Tk):
         ev = getattr(self, '_batch_stop_event', None)
         if ev is not None:
             ev.set()
-            self._log(self.batch_log, "⏹ Richiesta di stop inviata… attendere il termine dell'articolo in corso.")
+            self._log(self.batch_log, "⏹ Stop inviato… attendere il termine dell'articolo in corso.")
 
     def _run_scrape_search(self):
         q = self.scrape_search_var.get().strip()

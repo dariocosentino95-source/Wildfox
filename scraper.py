@@ -62,6 +62,184 @@ def save_credentials(fornitore_id: int, username: str, password: str):
     }))
 
 
+# ─── Browser condiviso (riuso per tutta la ricerca massiva) ─────────────────
+from contextlib import contextmanager
+
+
+@contextmanager
+def _acquire_browser(shared_browser):
+    """
+    Se `shared_browser` è passato lo riusa (NON lo chiude): è il caso della
+    ricerca massiva, dove si apre un solo Chromium per tutta la sessione invece
+    di rilanciarlo a ogni articolo (era il collo di bottiglia principale).
+    Se è None, apre un browser usa-e-getta e lo chiude all'uscita (ricerca
+    singola).
+    """
+    if shared_browser is not None:
+        yield shared_browser
+        return
+    from playwright.sync_api import sync_playwright
+    pw = sync_playwright().start()
+    try:
+        br = pw.chromium.launch(headless=True)
+        try:
+            yield br
+        finally:
+            br.close()
+    finally:
+        pw.stop()
+
+
+# ─── Selezione articoli per la ricerca (ambito + fornitore) ─────────────────
+
+def select_target_articoli(scope='tutti', keyword='', fornitore_id=None,
+                           solo_senza_codice=True, limite=None):
+    """
+    Restituisce gli articoli su cui fare la ricerca, secondo i criteri scelti.
+
+    scope:
+      'singolo'   → match per CODICE articolo (esatto o parziale) = `keyword`
+      'categoria' → match per parola nella DESCRIZIONE o nel codice = `keyword`
+                    (es. 'ottone')
+      'tutti'     → tutti gli articoli
+    fornitore_id:
+      None         → qualunque fornitore che abbia un portale configurato
+      id specifico → solo gli articoli collegati a quel fornitore
+    solo_senza_codice:
+      True  → solo articoli col codice fornitore MANCANTE (completa i codici)
+      False → tutti (utile per aggiornare i PREZZI anche dove il codice c'è)
+    limite: max numero di articoli (None = tutti)
+
+    Ritorna: lista di dict {id, codice, descrizione}.
+    """
+    where = ["f.url_portale IS NOT NULL", "f.url_portale != ''"]
+    params = []
+    if fornitore_id:
+        where.append("f.id = ?")
+        params.append(fornitore_id)
+    if solo_senza_codice:
+        where.append("(af.codice_fornitore IS NULL OR af.codice_fornitore = '')")
+    if scope == 'singolo' and keyword:
+        where.append("UPPER(a.codice) LIKE ?")
+        params.append(f"%{keyword.upper()}%")
+    elif scope == 'categoria' and keyword:
+        where.append("(UPPER(a.descrizione) LIKE ? OR UPPER(a.codice) LIKE ?)")
+        params.extend([f"%{keyword.upper()}%", f"%{keyword.upper()}%"])
+
+    sql = f"""
+        SELECT DISTINCT a.id, a.codice, a.descrizione
+        FROM articoli a
+        JOIN articolo_fornitore af ON af.articolo_id = a.id
+        JOIN fornitori f ON f.id = af.fornitore_id
+        WHERE {' AND '.join(where)}
+        ORDER BY a.codice
+    """
+    conn = db.get_connection()
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    articoli = [dict(r) for r in rows]
+    if limite:
+        articoli = articoli[:limite]
+    return articoli
+
+
+def portali_disponibili():
+    """Lista dei fornitori con portale configurato: [{id, nome}]."""
+    conn = db.get_connection()
+    rows = conn.execute("""
+        SELECT id, COALESCE(NULLIF(nome,''), codice_mexal) AS nome
+        FROM fornitori
+        WHERE url_portale IS NOT NULL AND url_portale != ''
+        ORDER BY nome
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─── Ricerca massiva con browser riusato (NON salva: ritorna i risultati) ───
+
+def search_batch(articoli, fornitore_ids=None, only_missing_code=False,
+                 progress_cb=None, log_cb=None, stop_event=None):
+    """
+    Cerca codici/prezzi per la lista `articoli` riusando UN SOLO browser per
+    tutta la sessione. NON salva nel database: ritorna la lista dei risultati
+    (da mostrare in tabella e salvare in modo selettivo con `save_results`).
+
+    fornitore_ids: se passato, cerca solo su questi fornitori; altrimenti su
+                   tutti i portali collegati all'articolo.
+    only_missing_code: True = salta i link che hanno già il codice fornitore.
+    """
+    from playwright.sync_api import sync_playwright
+
+    if log_cb:
+        # Avvisa subito sui portali senza credenziali (verrebbero saltati).
+        for p in portali_disponibili():
+            if _creds(p['id']).get('username'):
+                log_cb(f"🔐 {p['nome']}: credenziali OK")
+            else:
+                log_cb(f"⚠ {p['nome']}: credenziali MANCANTI → saltato "
+                       f"(configurale in 'Credenziali Portali').")
+        log_cb(f"Articoli da elaborare: {len(articoli)}")
+
+    risultati = []
+    totale = len(articoli)
+    pw = sync_playwright().start()
+    try:
+        browser = pw.chromium.launch(headless=True)
+        try:
+            for idx, art in enumerate(articoli):
+                if stop_event is not None and stop_event.is_set():
+                    if log_cb:
+                        log_cb(f"\n⏹ Interrotto dall'utente dopo {idx} articoli.")
+                    break
+                if progress_cb:
+                    progress_cb(idx + 1, totale, art['codice'])
+                try:
+                    res_list = search_article_on_portals(
+                        art['id'], shared_browser=browser,
+                        fornitore_ids=fornitore_ids,
+                        only_missing_code=only_missing_code)
+                except Exception as e:
+                    logger.warning(f"Errore su articolo {art['codice']}: {e}")
+                    res_list = []
+                for res in res_list:
+                    res['articolo_id'] = art['id']
+                    res['articolo_codice'] = art['codice']
+                    res['articolo_descr'] = art.get('descrizione', '')
+                    risultati.append(res)
+                if log_cb and (idx + 1) % 10 == 0:
+                    n_pr = sum(1 for r in risultati if r.get('prezzo'))
+                    log_cb(f"  …{idx+1}/{totale} elaborati, "
+                           f"{len(risultati)} risultati ({n_pr} con prezzo).")
+        finally:
+            browser.close()
+    finally:
+        pw.stop()
+
+    if log_cb:
+        n_pr = sum(1 for r in risultati if r.get('prezzo'))
+        log_cb(f"\n✅ Ricerca completata: {len(risultati)} risultati "
+               f"({n_pr} con prezzo). Rivedi la tabella e salva.")
+    return risultati
+
+
+def save_results(risultati):
+    """
+    Salva nel DB i risultati scelti (lista di dict con almeno articolo_id,
+    fornitore_id, e codice_trovato/prezzo). Ritorna il numero di righe salvate.
+    """
+    n = 0
+    for res in risultati:
+        try:
+            save_scraping_result(
+                res['articolo_id'], res['fornitore_id'],
+                res.get('codice_trovato', '') or '', res.get('prezzo'))
+            n += 1
+        except Exception as e:
+            logger.warning(f"Errore salvataggio {res.get('articolo_codice')}: {e}")
+    return n
+
+
 # ─── Entry point principale ────────────────────────────────────────────────
 
 def search_all_articles_on_portals(filtro='senza_codice',
@@ -197,12 +375,16 @@ def search_all_articles_on_portals(filtro='senza_codice',
     return tutti_risultati
 
 
-def search_article_on_portals(articolo_id: int, progress_cb=None):
+def search_article_on_portals(articolo_id: int, progress_cb=None,
+                              shared_browser=None, fornitore_ids=None,
+                              only_missing_code=False):
     """
-    Per un articolo cerca su tutti i portali dei fornitori assegnati che:
-      - non hanno ancora un codice_fornitore registrato, OPPURE
-      - devono aggiornare il prezzo
-    Usa i codici già noti come termini di ricerca sui portali senza codice.
+    Per un articolo cerca sui portali dei fornitori assegnati.
+    Usa i codici già noti come termini di ricerca sui portali.
+
+    shared_browser    → browser Playwright condiviso (ricerca massiva veloce)
+    fornitore_ids     → se passato, limita la ricerca a questi fornitori
+    only_missing_code → se True, salta i fornitori che hanno già il codice
     """
     conn = db.get_connection()
     art = conn.execute("SELECT * FROM articoli WHERE id=?", (articolo_id,)).fetchone()
@@ -211,6 +393,7 @@ def search_article_on_portals(articolo_id: int, progress_cb=None):
         FROM articolo_fornitore af
         JOIN fornitori f ON f.id = af.fornitore_id
         WHERE af.articolo_id=?
+          AND f.url_portale IS NOT NULL AND f.url_portale != ''
     """, (articolo_id,)).fetchall()
     conn.close()
 
@@ -220,20 +403,15 @@ def search_article_on_portals(articolo_id: int, progress_cb=None):
     art = dict(art)
     afs = [dict(r) for r in afs]
 
-    # Termini di ricerca: codici fornitore già noti + codice Mexal + descrizione breve
-    # NB: i campi dal DB possono essere NULL → normalizza con `or ""`
-    search_terms = []
-    for af in afs:
-        cod_forn = (af.get("codice_fornitore") or "").strip()
-        if cod_forn:
-            search_terms.append(cod_forn)
-    search_terms.append(art["codice"].strip())
+    # Filtri: solo certi fornitori e/o solo dove manca il codice fornitore
+    if fornitore_ids:
+        fornitore_ids = set(fornitore_ids)
+        afs = [af for af in afs if af['fornitore_id'] in fornitore_ids]
+    if only_missing_code:
+        afs = [af for af in afs if not (af.get('codice_fornitore') or '').strip()]
+
     descr = (art.get("descrizione") or "").strip()
-    if descr:
-        search_terms.append(descr[:40])
-    # dedup mantenendo ordine
-    seen = set()
-    search_terms = [t for t in search_terms if t and not (t in seen or seen.add(t))]
+    cod_mexal = (art.get("codice") or "").strip()
 
     results = []
     total = len(afs)
@@ -245,17 +423,31 @@ def search_article_on_portals(articolo_id: int, progress_cb=None):
         if progress_cb:
             progress_cb(idx + 1, total, af.get("nome") or af["codice_mexal"])
 
+        # Termini di ricerca specifici di QUESTO fornitore (priorità al suo
+        # codice già noto, poi il codice Mexal, infine la descrizione breve).
+        terms = []
+        cod_forn = (af.get("codice_fornitore") or "").strip()
+        if cod_forn:
+            terms.append(cod_forn)
+        if cod_mexal:
+            terms.append(cod_mexal)
+        if descr:
+            terms.append(descr[:40])
+        seen = set()
+        terms = [t for t in terms if t and not (t in seen or seen.add(t))]
+
         handler = _pick_handler(url)
         creds   = _creds(af["fornitore_id"])
         portal_cfg = _parse_portal_note(af.get("note") or "")
 
-        for term in search_terms:
+        for term in terms:
             try:
                 res = handler(
                     url=url,
                     search_term=term,
                     creds=creds,
                     config=portal_cfg,
+                    shared_browser=shared_browser,
                 )
             except Exception as e:
                 logger.warning(f"Errore scraping {url} term={term}: {e}")
@@ -265,10 +457,15 @@ def search_article_on_portals(articolo_id: int, progress_cb=None):
                 res["fornitore_id"]   = af["fornitore_id"]
                 res["fornitore_nome"] = af.get("nome") or af["codice_mexal"]
                 res["search_term"]    = term
+                res["cod_attuale"]    = cod_forn
+                res["stato"] = ("prezzo" if res.get("prezzo")
+                                else ("solo_codice" if res.get("codice_trovato")
+                                      else "vuoto"))
                 results.append(res)
                 break   # trovato: prossimo fornitore
 
-        time.sleep(0.5)
+        if shared_browser is None:
+            time.sleep(0.5)
 
     return results
 
@@ -308,7 +505,7 @@ def _pick_handler(url: str):
 #  Ricerca: form con campo "Codice" + "Descrizione", risultati via XHR
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _scrape_cardinale(url, search_term, creds, config):
+def _scrape_cardinale(url, search_term, creds, config, shared_browser=None):
     """
     Flusso:
       1. Apri http://shop.cardinalegroup.it/login
@@ -316,7 +513,7 @@ def _scrape_cardinale(url, search_term, creds, config):
       3. Vai alla home, usa la barra di ricerca per codice
       4. Aspetta i risultati e leggi codice + prezzo
     """
-    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    from playwright.sync_api import TimeoutError as PWTimeout
 
     base = "https://shop.cardinalegroup.it"
     cache_key = f"cardinale:{base}"
@@ -327,9 +524,7 @@ def _scrape_cardinale(url, search_term, creds, config):
         logger.warning("Cardinale: credenziali non configurate")
         return None
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-
+    with _acquire_browser(shared_browser) as browser:
         # Usa sessione cached se disponibile (evita re-login)
         saved_state = _get_cached_session(cache_key)
         ctx = browser.new_context(
@@ -444,7 +639,10 @@ def _scrape_cardinale(url, search_term, creds, config):
             _invalidate_session(cache_key)
             return None
         finally:
-            browser.close()
+            try:
+                ctx.close()
+            except Exception:
+                pass
 
 
 def _cardinale_parse_results(page, search_term):
@@ -531,8 +729,8 @@ def _cardinale_parse_results(page, search_term):
 #  Ricerca: /catalogo/prodotti?q={term}  oppure barra di ricerca
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _scrape_spolzino(url, search_term, creds, config):
-    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+def _scrape_spolzino(url, search_term, creds, config, shared_browser=None):
+    from playwright.sync_api import TimeoutError as PWTimeout
 
     base = "https://www.spolzino.com"
     cache_key = f"spolzino:{base}"
@@ -543,8 +741,7 @@ def _scrape_spolzino(url, search_term, creds, config):
         logger.warning("Spolzino: credenziali non configurate")
         return None
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
+    with _acquire_browser(shared_browser) as browser:
         saved_state = _get_cached_session(cache_key)
         ctx = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -603,7 +800,10 @@ def _scrape_spolzino(url, search_term, creds, config):
             _invalidate_session(cache_key)
             return None
         finally:
-            browser.close()
+            try:
+                ctx.close()
+            except Exception:
+                pass
 
 
 def _spolzino_parse_results(page, search_term):
@@ -658,8 +858,8 @@ def _spolzino_parse_results(page, search_term):
 #  Alternativa REST API: /rest/V1/products (richiede token Bearer)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _scrape_idroferrara(url, search_term, creds, config):
-    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+def _scrape_idroferrara(url, search_term, creds, config, shared_browser=None):
+    from playwright.sync_api import TimeoutError as PWTimeout
 
     base = "https://aziende.idroferrara.com"
     username = creds.get("username", "")
@@ -678,8 +878,7 @@ def _scrape_idroferrara(url, search_term, creds, config):
         logger.warning("IdroFerrara: credenziali non configurate")
         return None
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
+    with _acquire_browser(shared_browser) as browser:
         ctx = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                        "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
@@ -722,7 +921,10 @@ def _scrape_idroferrara(url, search_term, creds, config):
             logger.exception(f"IdroFerrara scraping error: {e}")
             return None
         finally:
-            browser.close()
+            try:
+                ctx.close()
+            except Exception:
+                pass
 
 
 def _idroferrara_get_token(base: str, username: str, password: str) -> Optional[str]:
@@ -873,7 +1075,7 @@ def _idroferrara_parse_results(page, search_term, base):
 #  o euristica HTML con requests + BeautifulSoup
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _scrape_generic(url, search_term, creds, config):
+def _scrape_generic(url, search_term, creds, config, shared_browser=None):
     """
     Strategia:
       1. Se configurato search_url_template → GET diretto (no JS)
@@ -920,53 +1122,56 @@ def _scrape_generic(url, search_term, creds, config):
         if r.status_code != 200:
             # Prova con Playwright headless
             return _generic_playwright(base, search_url, search_term,
-                                       username, password, config)
+                                       username, password, config, shared_browser)
         soup = BeautifulSoup(r.text, "lxml")
         return _generic_parse(soup, search_term, search_url, config)
     except Exception as e:
         logger.warning(f"Generic scraping error {url}: {e}")
         return _generic_playwright(base, search_url, search_term,
-                                   username, password, config)
+                                   username, password, config, shared_browser)
 
 
-def _generic_playwright(base, search_url, search_term, username, password, config):
+def _generic_playwright(base, search_url, search_term, username, password,
+                        config, shared_browser=None):
     """Fallback Playwright per siti con JavaScript o login complesso."""
-    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
     try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+        with _acquire_browser(shared_browser) as browser:
             ctx = browser.new_context(locale="it-IT")
             page = ctx.new_page()
+            try:
+                if username and password:
+                    login_url = config.get("login_url", f"{base}/login")
+                    page.goto(login_url, wait_until="networkidle", timeout=20000)
+                    _pw_fill(page, ['input[name="username"]', 'input[type="email"]',
+                                    '#email', '#username'],
+                             username)
+                    _pw_fill(page, ['input[type="password"]', '#password'],
+                             password)
+                    _pw_click(page, ['button[type="submit"]', 'input[type="submit"]'])
+                    page.wait_for_load_state("networkidle", timeout=12000)
 
-            if username and password:
-                login_url = config.get("login_url", f"{base}/login")
-                page.goto(login_url, wait_until="networkidle", timeout=20000)
-                _pw_fill(page, ['input[name="username"]', 'input[type="email"]',
-                                '#email', '#username'],
-                         username)
-                _pw_fill(page, ['input[type="password"]', '#password'],
-                         password)
-                _pw_click(page, ['button[type="submit"]', 'input[type="submit"]'])
-                page.wait_for_load_state("networkidle", timeout=12000)
+                page.goto(search_url, wait_until="networkidle", timeout=20000)
+                page.wait_for_timeout(2000)
+                body = page.inner_text("body")
 
-            page.goto(search_url, wait_until="networkidle", timeout=20000)
-            page.wait_for_timeout(2000)
-            body = page.inner_text("body")
+                code_found = search_term if search_term.upper() in body.upper() else None
+                price_found = None
+                prices = re.findall(r'(\d{1,5}[,\.]\d{2,4})', body)
+                for p in prices:
+                    val = float(p.replace(",", "."))
+                    if 0.1 < val < 99999:
+                        price_found = val
+                        break
 
-            code_found = search_term if search_term.upper() in body.upper() else None
-            price_found = None
-            prices = re.findall(r'(\d{1,5}[,\.]\d{2,4})', body)
-            for p in prices:
-                val = float(p.replace(",", "."))
-                if 0.1 < val < 99999:
-                    price_found = val
-                    break
-
-            browser.close()
-            if code_found or price_found:
-                return {"codice_trovato": code_found,
-                        "prezzo": price_found,
-                        "url": page.url}
+                if code_found or price_found:
+                    return {"codice_trovato": code_found,
+                            "prezzo": price_found,
+                            "url": page.url}
+            finally:
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
     except Exception as e:
         logger.warning(f"Generic Playwright error: {e}")
     return None
