@@ -1237,8 +1237,20 @@ def _scrape_webscaem(url, search_term, creds, config, shared_browser=None):
                                 'input[placeholder="utente" i]'], username)
                 _pw_fill(page, ['input[name="password"]',
                                 'input[type="password"]'], password)
-                _pw_click(page, ['button[type="submit"]', 'input[type="submit"]', 'button'])
-                page.wait_for_load_state("networkidle", timeout=15000)
+                # Invio del form: prima Enter sul campo password (più affidabile);
+                # se resta sulla pagina di login, prova a cliccare il bottone.
+                try:
+                    page.press('input[name="password"]', 'Enter')
+                    page.wait_for_load_state("networkidle", timeout=15000)
+                except Exception:
+                    pass
+                if page.query_selector('input[name="utente"]'):
+                    try:
+                        page.click('button[type="submit"], input[type="submit"], button',
+                                   timeout=4000)
+                        page.wait_for_load_state("networkidle", timeout=15000)
+                    except Exception:
+                        pass
                 page.wait_for_timeout(800)
                 # Login fallito se è ancora presente il campo 'utente'
                 if page.query_selector('input[name="utente"]'):
