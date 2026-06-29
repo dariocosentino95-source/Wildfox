@@ -1407,11 +1407,12 @@ class IDUApp(tk.Tk):
         self.live_art_var = tk.StringVar(value='')
         tk.Label(lr, textvariable=self.live_art_var, font=FONT_S, bg=BG2, fg=FG2).pack(side='left', padx=10)
 
-        cols_l = ('fornitore', 'cod_forn', 'prezzo', 'disp', 'best')
+        cols_l = ('fornitore', 'cod_forn', 'prezzo', 'disp', 'vs_costo', 'best')
         self.live_tree = _tree(
             f, cols_l,
-            headings=('Fornitore', 'Cod. fornitore', 'Prezzo (live)', 'Disponibilità', '✔'),
-            widths=(160, 150, 110, 110, 40), height=5)
+            headings=('Fornitore', 'Cod. fornitore', 'Prezzo (live)',
+                      'Disponibilità', 'vs costo ult.', '✔'),
+            widths=(150, 140, 105, 95, 100, 36), height=5)
         self.live_tree.tag_configure('best', foreground=ACCENT2)
         tk.Label(f, text=(
             "Interroga in tempo reale i portali dei fornitori dell'articolo (servono le "
@@ -1458,8 +1459,12 @@ class IDUApp(tk.Tk):
         art = next((r for r in rows
                     if (r['codice'] or '').strip().upper() == q.upper()), rows[0])
         art_id = art['id']
+        costo = art['costo_ult'] if 'costo_ult' in art.keys() else None
+        costo_s = (f"{costo:.4f}".rstrip('0').rstrip('.').replace('.', ',')
+                   if costo else '—')
         self.live_art_var.set(
-            f"Articolo: {art['codice']} — {(art['descrizione'] or '')[:40]}"
+            f"Articolo: {art['codice']} — {(art['descrizione'] or '')[:32]}"
+            f"   ·   costo ultimo: € {costo_s}"
             + (f"  (+{len(rows)-1} simili)" if len(rows) > 1 else ''))
         self.live_tree.delete(*self.live_tree.get_children())
         self._live_btn.config(state='disabled')
@@ -1482,6 +1487,12 @@ class IDUApp(tk.Tk):
                         self.status_var.set(
                             "Nessun risultato live (controlla credenziali/collegamenti del fornitore).")
                         return
+                    def _vs(p):
+                        if not costo or not p:
+                            return '—'
+                        d = (p - costo) / costo * 100.0
+                        freccia = ' ↓' if d < -0.5 else (' ↑' if d > 0.5 else '')
+                        return f"{d:+.0f}%{freccia}"
                     for r in res:
                         p = r.get('prezzo')
                         is_best = (p is not None and best is not None
@@ -1493,6 +1504,7 @@ class IDUApp(tk.Tk):
                                     (f"{p:.4f}".rstrip('0').rstrip('.').replace('.', ',')
                                      if p else '—'),
                                     r.get('disponibilita') or '—',
+                                    _vs(p),
                                     '⭐' if is_best else ''))
                     self.status_var.set(f"Confronto live: {len(res)} fornitori.")
                 self.after(0, render)
