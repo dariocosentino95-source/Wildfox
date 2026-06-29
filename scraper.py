@@ -814,6 +814,13 @@ def _cardinale_parse_results(page, search_term):
             cells = l.split('\t')
             first = cells[0].strip().upper()
             if first == term_up or (len(cells) > 2 and term_up in l.upper()):
+                # Disponibilità (giacenza fornitore): nella riga risultati è
+                # l'ultima cella numerica (es. '…\tNR\t\t1\t1\t93\t' → 93).
+                giac = None
+                for c in cells[1:]:
+                    c = c.strip()
+                    if c.isdigit():
+                        giac = c
                 prices, sconto = _block_prices(i)
                 if prices:
                     netto = min(prices)   # col listino scontato il netto è il più basso
@@ -823,11 +830,12 @@ def _cardinale_parse_results(page, search_term):
                         "prezzo": netto,
                         "prezzo_lordo": lordo if lordo != netto else None,
                         "sconto": sconto,
+                        "disponibilita": giac,
                         "url": page.url,
                     }
                 # Codice trovato ma prezzo non visibile (es. login mancante)
                 return {"codice_trovato": first or search_term,
-                        "prezzo": None, "url": page.url}
+                        "prezzo": None, "disponibilita": giac, "url": page.url}
 
         # 2) Fallback per pagina prodotto diretta (non è una pagina di ricerca)
         if 'risultati ricerca' not in body.lower() and term_up in body.upper():

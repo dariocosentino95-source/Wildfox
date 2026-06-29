@@ -1390,34 +1390,119 @@ class IDUApp(tk.Tk):
 
     def _build_tab_pdf_order(self):
         f = self.tab_pdf_order
-        _section(f, "Carica PDF ordine/merce: confronto prezzi per fornitore più conveniente")
 
+        # ── Confronto LIVE per singolo articolo (interroga i portali ora) ──
+        _section(f, "🔎 Confronto live per articolo — dove conviene comprare")
+        lr = tk.Frame(f, bg=BG2)
+        lr.pack(fill='x', padx=20, pady=6)
+        tk.Label(lr, text="Articolo (codice o descrizione):",
+                 font=FONT_S, bg=BG2, fg=FG).pack(side='left')
+        self.live_search_var = tk.StringVar()
+        le = tk.Entry(lr, textvariable=self.live_search_var, font=FONT_S,
+                      bg=CARD, fg=FG, insertbackground=FG, width=26)
+        le.pack(side='left', padx=8)
+        le.bind('<Return>', lambda *_: self._run_live_compare())
+        self._live_btn = _btn(lr, "🔎 Cerca live", self._run_live_compare, color=ACCENT2)
+        self._live_btn.pack(side='left')
+        self.live_art_var = tk.StringVar(value='')
+        tk.Label(lr, textvariable=self.live_art_var, font=FONT_S, bg=BG2, fg=FG2).pack(side='left', padx=10)
+
+        cols_l = ('fornitore', 'cod_forn', 'prezzo', 'disp', 'best')
+        self.live_tree = _tree(
+            f, cols_l,
+            headings=('Fornitore', 'Cod. fornitore', 'Prezzo (live)', 'Disponibilità', '✔'),
+            widths=(160, 150, 110, 110, 40), height=5)
+        self.live_tree.tag_configure('best', foreground=ACCENT2)
+        tk.Label(f, text=(
+            "Interroga in tempo reale i portali dei fornitori dell'articolo (servono le "
+            "credenziali). La disponibilità è mostrata dove il portale la espone (es. Cardinale)."
+        ), font=FONT_S, bg=BG2, fg=FG2, justify='left').pack(padx=20, pady=(0, 2), anchor='w')
+
+        # ── Confronto da PDF ordine (prezzi salvati) ──
+        _section(f, "Oppure carica un PDF ordine (confronto da prezzi salvati)")
         row = tk.Frame(f, bg=BG2)
-        row.pack(fill='x', padx=20, pady=8)
+        row.pack(fill='x', padx=20, pady=6)
         self.order_file_var = tk.StringVar(value="Nessun file")
         tk.Label(row, textvariable=self.order_file_var,
-                 font=FONT_S, bg=BG2, fg=FG2, width=55, anchor='w').pack(side='left')
+                 font=FONT_S, bg=BG2, fg=FG2, width=48, anchor='w').pack(side='left')
         _btn(row, "Sfoglia PDF…", self._browse_order_pdf).pack(side='left', padx=8)
         _btn(row, "▶  Analizza", self._run_pdf_order, color=ACCENT2).pack(side='left')
 
-        # Articoli trovati
-        _section(f, "Articoli trovati nel PDF")
         cols_a = ('codice', 'descrizione', 'um')
         self.order_art_tree = _tree(f, cols_a,
                                     headings=('Codice', 'Descrizione', 'UM'),
-                                    widths=(120, 420, 60), height=5)
+                                    widths=(120, 420, 60), height=3)
 
-        # Confronto prezzi
-        _section(f, "Confronto prezzi per fornitore")
+        _section(f, "Confronto prezzi per fornitore (salvati)")
         cols_p = ('codice', 'descrizione', 'fornitore', 'cod_forn', 'prezzo_forn', 'prezzo_base', 'conveniente')
         self.order_price_tree = _tree(
             f, cols_p,
             headings=('Codice', 'Descrizione', 'Fornitore', 'Cod. Forn.', 'Prezzo Forn.', 'Prezzo Base', '✔'),
-            widths=(100, 260, 130, 100, 90, 90, 40),
-            height=8
+            widths=(100, 240, 130, 100, 90, 90, 40),
+            height=5
         )
         _btn(f, "💾 Esporta confronto CSV", self._export_order_csv,
              color=ACCENT).pack(anchor='e', padx=20, pady=4)
+
+    def _run_live_compare(self):
+        import threading as _th
+        q = self.live_search_var.get().strip()
+        if not q:
+            return
+        rows = db.search_articles(q)
+        if not rows:
+            messagebox.showinfo("Articolo non trovato",
+                                f"Nessun articolo per '{q}'.")
+            return
+        # preferisci la corrispondenza esatta di codice, altrimenti la prima
+        art = next((r for r in rows
+                    if (r['codice'] or '').strip().upper() == q.upper()), rows[0])
+        art_id = art['id']
+        self.live_art_var.set(
+            f"Articolo: {art['codice']} — {(art['descrizione'] or '')[:40]}"
+            + (f"  (+{len(rows)-1} simili)" if len(rows) > 1 else ''))
+        self.live_tree.delete(*self.live_tree.get_children())
+        self._live_btn.config(state='disabled')
+        self.status_var.set("Ricerca live sui portali…")
+
+        def _task():
+            try:
+                ok, msg = scraper.browser_disponibile()
+                if not ok:
+                    self.after(0, lambda: messagebox.showerror("Browser", msg))
+                    return
+                res = scraper.search_article_on_portals(art_id)
+                res = sorted(res, key=lambda r: (r.get('prezzo') is None,
+                                                 r.get('prezzo') or 9e9))
+                best = res[0].get('prezzo') if res and res[0].get('prezzo') else None
+
+                def render():
+                    self.live_tree.delete(*self.live_tree.get_children())
+                    if not res:
+                        self.status_var.set(
+                            "Nessun risultato live (controlla credenziali/collegamenti del fornitore).")
+                        return
+                    for r in res:
+                        p = r.get('prezzo')
+                        is_best = (p is not None and best is not None
+                                   and abs(p - best) < 1e-9)
+                        self.live_tree.insert(
+                            '', 'end', tags=('best',) if is_best else (),
+                            values=(r.get('fornitore_nome', ''),
+                                    r.get('codice_trovato') or '—',
+                                    (f"{p:.4f}".rstrip('0').rstrip('.').replace('.', ',')
+                                     if p else '—'),
+                                    r.get('disponibilita') or '—',
+                                    '⭐' if is_best else ''))
+                    self.status_var.set(f"Confronto live: {len(res)} fornitori.")
+                self.after(0, render)
+            except Exception as e:
+                self.after(0, lambda: self.status_var.set(f"Errore ricerca live: {e}"))
+                logger.exception("Live compare")
+            finally:
+                self.after(0, lambda: self._live_btn.config(state='normal'))
+
+        _th.Thread(target=_task, daemon=True).start()
 
     def _browse_order_pdf(self):
         p = filedialog.askopenfilename(
