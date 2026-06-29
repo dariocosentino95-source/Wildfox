@@ -575,6 +575,11 @@ def search_article_on_portals(articolo_id: int, progress_cb=None,
                 logger.warning(f"Errore scraping {url} term={term}: {e}")
                 res = None
 
+            # Ignora i marcatori 'solo login' (login OK ma nessun prodotto):
+            # servono al 'Testa login', non alla ricerca reale.
+            if res and res.get('_solo_login'):
+                res = None
+
             if res:
                 res["fornitore_id"]   = af["fornitore_id"]
                 res["fornitore_nome"] = af.get("nome") or af["codice_mexal"]
@@ -1258,11 +1263,12 @@ def _scrape_webscaem(url, search_term, creds, config, shared_browser=None):
                     pass
             page.wait_for_timeout(1200)
             res = _webscaem_parse(page, search_term)
-            # Se il login è OK ma la ricerca non ha trovato la barra/risultati,
-            # segnala comunque l'accesso riuscito (utile al 'Testa login').
-            if res is None and not cercato:
+            # Arrivati qui il login è RIUSCITO (il campo 'utente' non c'è più):
+            # se la ricerca non trova nulla, segnala comunque l'accesso OK, così
+            # il 'Testa login' è inequivocabile (riuscito ≠ ricerca a vuoto).
+            if res is None:
                 return {"codice_trovato": None, "prezzo": None,
-                        "login_ok": True, "url": page.url}
+                        "login_ok": True, "url": page.url, "_solo_login": True}
             return res
         except PWTimeout:
             logger.warning(f"webscaem: timeout per '{search_term}'")
