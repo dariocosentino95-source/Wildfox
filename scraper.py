@@ -618,6 +618,8 @@ def _pick_handler(url: str):
         return _scrape_spolzino
     if "idroferrara" in url_l:
         return _scrape_idroferrara
+    if "webscaem" in url_l:
+        return _scrape_webscaem
     return _scrape_generic
 
 
@@ -1196,6 +1198,102 @@ def _idroferrara_parse_results(page, search_term, base):
             }
     except Exception as e:
         logger.warning(f"IdroFerrara parse error: {e}")
+    return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  HANDLER 4 — WEBSCAEM / CAEM  (es. Bonardi: bonardi.webscaem.it)
+#  Login: form POST a /login.php con campi 'utente' e 'password'.
+#  La ricerca prodotti è dietro il login; estrazione prezzo best-effort
+#  (da rifinire quando si conosce la struttura della pagina risultati).
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _scrape_webscaem(url, search_term, creds, config, shared_browser=None):
+    from playwright.sync_api import TimeoutError as PWTimeout
+
+    m = re.match(r'https?://[^/]+', url)
+    base = m.group(0) if m else url.rstrip('/')
+    cache_key = f"webscaem:{base}"
+    username = creds.get("username", "")
+    password = creds.get("password", "")
+    if not username or not password:
+        logger.warning("webscaem: credenziali non configurate")
+        return None
+
+    with _acquire_browser(shared_browser) as browser:
+        saved = _get_cached_session(cache_key)
+        ctx = browser.new_context(locale="it-IT", storage_state=saved)
+        page = ctx.new_page()
+        try:
+            # LOGIN solo se non c'è sessione valida in cache
+            if not saved:
+                page.goto(f"{base}/login.php", wait_until="domcontentloaded", timeout=25000)
+                _pw_fill(page, ['input[name="utente"]',
+                                'input[placeholder="utente" i]'], username)
+                _pw_fill(page, ['input[name="password"]',
+                                'input[type="password"]'], password)
+                _pw_click(page, ['button[type="submit"]', 'input[type="submit"]', 'button'])
+                page.wait_for_load_state("networkidle", timeout=15000)
+                page.wait_for_timeout(800)
+                # Login fallito se è ancora presente il campo 'utente'
+                if page.query_selector('input[name="utente"]'):
+                    logger.warning("webscaem: login fallito (campo utente ancora presente)")
+                    _invalidate_session(cache_key)
+                    return None
+                _save_session(cache_key, ctx.storage_state())
+
+            # RICERCA (best-effort): usa una barra di ricerca della pagina
+            cercato = False
+            for sel in ['input[type="search"]', 'input[name*="cerca" i]',
+                        'input[name*="ricerca" i]', 'input[name*="search" i]',
+                        'input[name="q"]', 'input[placeholder*="cerca" i]',
+                        'input[placeholder*="ricerca" i]']:
+                try:
+                    page.fill(sel, search_term, timeout=2500)
+                    page.keyboard.press("Enter")
+                    page.wait_for_load_state("networkidle", timeout=12000)
+                    cercato = True
+                    break
+                except Exception:
+                    pass
+            page.wait_for_timeout(1200)
+            res = _webscaem_parse(page, search_term)
+            # Se il login è OK ma la ricerca non ha trovato la barra/risultati,
+            # segnala comunque l'accesso riuscito (utile al 'Testa login').
+            if res is None and not cercato:
+                return {"codice_trovato": None, "prezzo": None,
+                        "login_ok": True, "url": page.url}
+            return res
+        except PWTimeout:
+            logger.warning(f"webscaem: timeout per '{search_term}'")
+            _invalidate_session(cache_key)
+            return None
+        except Exception as e:
+            logger.exception(f"webscaem scraping error: {e}")
+            _invalidate_session(cache_key)
+            return None
+        finally:
+            try:
+                ctx.close()
+            except Exception:
+                pass
+
+
+def _webscaem_parse(page, search_term):
+    """Estrazione best-effort di codice/prezzo dalla pagina risultati webscaem."""
+    try:
+        body = page.inner_text("body")
+        if search_term.upper() not in body.upper():
+            return None
+        prezzo = None
+        for p in re.findall(r'(\d{1,5}[.,]\d{2,4})', body):
+            v = _parse_price(p)
+            if v and 0.01 < v < 99999:
+                prezzo = v
+                break
+        return {"codice_trovato": search_term, "prezzo": prezzo, "url": page.url}
+    except Exception as e:
+        logger.warning(f"webscaem parse error: {e}")
     return None
 
 
