@@ -67,10 +67,14 @@ FG2      = '#6b7280'   # testo attenuato
 CARD     = '#f3f4f6'   # campi / card (grigio chiarissimo)
 ROW_ALT  = '#f7f8fa'   # righe alternate nelle tabelle
 BTN      = '#64748b'   # colore default dei pulsanti (testo bianco)
+SIDEBAR_BG   = '#f1f5f9'   # sfondo barra laterale (slate chiaro)
+NAV_HOVER_BG = '#e7edf4'   # voce nav in hover
+NAV_ACTIVE_BG = '#dbeafe'  # voce nav attiva (blu chiaro)
 FONT     = ('Segoe UI', 10)
 FONT_B   = ('Segoe UI', 10, 'bold')
 FONT_H   = ('Segoe UI', 14, 'bold')
 FONT_S   = ('Segoe UI', 9)
+FONT_EMOJI = ('Segoe UI Emoji', 12)
 
 
 class IDUApp(tk.Tk):
@@ -123,31 +127,47 @@ class IDUApp(tk.Tk):
         tk.Label(hdr, text="Gestione Listini Fornitori",
                  font=FONT_S, bg=BG, fg=FG2).pack(side='left', padx=12, pady=4)
 
-        # Notebook tabs
-        self.nb = ttk.Notebook(self)
-        self.nb.pack(fill='both', expand=True, padx=12, pady=(0, 8))
+        # Layout principale: barra laterale (sinistra) + area contenuto (destra)
+        body = tk.Frame(self, bg=BG)
+        body.pack(fill='both', expand=True)
 
-        self.tab_import    = tk.Frame(self.nb, bg=BG2)
-        self.tab_articles  = tk.Frame(self.nb, bg=BG2)
-        self.tab_documenti = tk.Frame(self.nb, bg=BG2)
-        self.tab_upload    = tk.Frame(self.nb, bg=BG2)
-        self.tab_pdf_order = tk.Frame(self.nb, bg=BG2)
-        self.tab_scraper   = tk.Frame(self.nb, bg=BG2)
-        self.tab_batch     = tk.Frame(self.nb, bg=BG2)
-        self.tab_suppliers = tk.Frame(self.nb, bg=BG2)
-        self.tab_creds     = tk.Frame(self.nb, bg=BG2)
-        self.tab_schedule  = tk.Frame(self.nb, bg=BG2)
+        self.sidebar = tk.Frame(body, bg=SIDEBAR_BG, width=204)
+        self.sidebar.pack(side='left', fill='y')
+        self.sidebar.pack_propagate(False)
 
-        self.nb.add(self.tab_import,    text="  📥 Importa / Esporta Mexal  ")
-        self.nb.add(self.tab_articles,  text="  🔍 Articoli  ")
-        self.nb.add(self.tab_documenti, text="  🧾 Documenti Fornitore  ")
-        self.nb.add(self.tab_upload,    text="  💾 Upload Listino  ")
-        self.nb.add(self.tab_pdf_order, text="  📄 Ordine PDF  ")
-        self.nb.add(self.tab_scraper,   text="  🌐 Ricerca Portali  ")
-        self.nb.add(self.tab_batch,     text="  🚀 Ricerca Massiva  ")
-        self.nb.add(self.tab_suppliers, text="  🏭 Fornitori  ")
-        self.nb.add(self.tab_creds,     text="  🔐 Credenziali Portali  ")
-        self.nb.add(self.tab_schedule,  text="  🕐 Pianificazione  ")
+        content = tk.Frame(body, bg=BG2)
+        content.pack(side='left', fill='both', expand=True)
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=1)
+
+        # Le schede ora sono frame sovrapposti nello stesso riquadro: si alza
+        # quella attiva con tkraise() invece di usare il Notebook.
+        self.tab_import    = tk.Frame(content, bg=BG2)
+        self.tab_articles  = tk.Frame(content, bg=BG2)
+        self.tab_documenti = tk.Frame(content, bg=BG2)
+        self.tab_upload    = tk.Frame(content, bg=BG2)
+        self.tab_pdf_order = tk.Frame(content, bg=BG2)
+        self.tab_scraper   = tk.Frame(content, bg=BG2)
+        self.tab_batch     = tk.Frame(content, bg=BG2)
+        self.tab_suppliers = tk.Frame(content, bg=BG2)
+        self.tab_creds     = tk.Frame(content, bg=BG2)
+        self.tab_schedule  = tk.Frame(content, bg=BG2)
+
+        # Voci di navigazione: (icona, etichetta, frame)
+        self._nav_items = [
+            ('📥', 'Importa / esporta', self.tab_import),
+            ('🔍', 'Articoli',          self.tab_articles),
+            ('🧾', 'Documenti',         self.tab_documenti),
+            ('💾', 'Upload listino',    self.tab_upload),
+            ('🛒', 'Ordine',            self.tab_pdf_order),
+            ('🌐', 'Ricerca portali',   self.tab_scraper),
+            ('🚀', 'Ricerca massiva',   self.tab_batch),
+            ('🏭', 'Fornitori',         self.tab_suppliers),
+            ('🔐', 'Credenziali',       self.tab_creds),
+            ('🕐', 'Pianificazione',    self.tab_schedule),
+        ]
+        for _ic, _lb, fr in self._nav_items:
+            fr.grid(row=0, column=0, sticky='nsew')
 
         self._build_tab_import()
         self._build_tab_articles()
@@ -160,12 +180,65 @@ class IDUApp(tk.Tk):
         self._build_tab_credentials()
         self._build_tab_schedule()
 
+        self._build_sidebar()
+        self._show_tab(self.tab_import)
+
         # Status bar (con sottile separatore sopra)
         self.status_var = tk.StringVar(value="Pronto.")
         sb = tk.Label(self, textvariable=self.status_var,
                       font=FONT_S, bg=BG, fg=FG2, anchor='w', padx=12, pady=3)
         sb.pack(fill='x', side='bottom')
         tk.Frame(self, bg=CARD, height=1).pack(fill='x', side='bottom')
+
+    # ── Barra laterale di navigazione ─────────────────────────────────────────
+
+    def _build_sidebar(self):
+        s = self.sidebar
+        logo = tk.Frame(s, bg=SIDEBAR_BG)
+        logo.pack(fill='x', padx=14, pady=(16, 14))
+        tk.Label(logo, text='💧', font=('Segoe UI Emoji', 18),
+                 bg=SIDEBAR_BG, fg=ACCENT).pack(side='left')
+        tk.Label(logo, text='IDU Price\nManager', font=FONT_B, justify='left',
+                 bg=SIDEBAR_BG, fg=FG).pack(side='left', padx=8)
+
+        self._nav_rows = {}
+        for icon, label, frame in self._nav_items:
+            row = tk.Frame(s, bg=SIDEBAR_BG, cursor='hand2')
+            row.pack(fill='x')
+            bar = tk.Frame(row, bg=SIDEBAR_BG, width=3)
+            bar.pack(side='left', fill='y')
+            inner = tk.Frame(row, bg=SIDEBAR_BG)
+            inner.pack(side='left', fill='x', expand=True, padx=(10, 8), pady=7)
+            ic = tk.Label(inner, text=icon, font=FONT_EMOJI, bg=SIDEBAR_BG, fg=FG2)
+            ic.pack(side='left')
+            tx = tk.Label(inner, text=label, font=FONT_S, bg=SIDEBAR_BG, fg=FG2)
+            tx.pack(side='left', padx=9)
+            self._nav_rows[frame] = (row, bar, inner, ic, tx)
+            for w in (row, inner, ic, tx):
+                w.bind('<Button-1>', lambda _e, fr=frame: self._show_tab(fr))
+                w.bind('<Enter>', lambda _e, fr=frame: self._nav_hover(fr, True))
+                w.bind('<Leave>', lambda _e, fr=frame: self._nav_hover(fr, False))
+
+    def _show_tab(self, frame):
+        frame.tkraise()
+        self._active_tab = frame
+        for fr, (row, bar, inner, ic, tx) in self._nav_rows.items():
+            on = (fr is frame)
+            bg = NAV_ACTIVE_BG if on else SIDEBAR_BG
+            fg = ACCENT if on else FG2
+            bar.config(bg=ACCENT if on else SIDEBAR_BG)
+            row.config(bg=bg)
+            inner.config(bg=bg)
+            ic.config(bg=bg, fg=fg)
+            tx.config(bg=bg, fg=fg)
+
+    def _nav_hover(self, frame, entering):
+        if frame is getattr(self, '_active_tab', None):
+            return
+        row, bar, inner, ic, tx = self._nav_rows[frame]
+        bg = NAV_HOVER_BG if entering else SIDEBAR_BG
+        for w in (row, inner, ic, tx):
+            w.config(bg=bg)
 
     # ── TAB: Importa CSV Mexal ────────────────────────────────────────────────
 
