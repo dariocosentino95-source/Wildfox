@@ -1480,6 +1480,13 @@ class IDUApp(tk.Tk):
         self.live_art_var = tk.StringVar(value='')
         tk.Label(lr, textvariable=self.live_art_var, font=FONT_S, bg=BG2, fg=FG2).pack(side='left', padx=10)
 
+        # Schede metriche (si popolano dopo la ricerca live)
+        mcrow = tk.Frame(f, bg=BG2)
+        mcrow.pack(fill='x', padx=16, pady=(4, 6))
+        self._mc_best, self._mc_best_sub, self._mc_best_lbl = _metric_card(mcrow, 'Miglior prezzo')
+        self._mc_vs, self._mc_vs_sub, self._mc_vs_lbl = _metric_card(mcrow, 'vs costo ultimo')
+        self._mc_disp, self._mc_disp_sub, self._mc_disp_lbl = _metric_card(mcrow, 'Disponibilità')
+
         cols_l = ('fornitore', 'cod_forn', 'prezzo', 'disp', 'vs_costo', 'best')
         self.live_tree = _tree(
             f, cols_l,
@@ -1554,12 +1561,39 @@ class IDUApp(tk.Tk):
                                                  r.get('prezzo') or 9e9))
                 best = res[0].get('prezzo') if res and res[0].get('prezzo') else None
 
+                def _fmt(v):
+                    return (f"{v:.4f}".rstrip('0').rstrip('.').replace('.', ',')
+                            if v else '—')
+
                 def render():
                     self.live_tree.delete(*self.live_tree.get_children())
                     if not res:
+                        for vv in (self._mc_best, self._mc_vs, self._mc_disp):
+                            vv.set('—')
+                        for vv in (self._mc_best_sub, self._mc_vs_sub, self._mc_disp_sub):
+                            vv.set('')
+                        self._mc_vs_lbl.config(fg=FG)
                         self.status_var.set(
                             "Nessun risultato live (controlla credenziali/collegamenti del fornitore).")
                         return
+                    bp = res[0]
+                    bprz = bp.get('prezzo')
+                    self._mc_best.set(f"€ {_fmt(bprz)}" if bprz else '—')
+                    self._mc_best_sub.set(bp.get('fornitore_nome', '') if bprz else '')
+                    self._mc_disp.set(str(bp.get('disponibilita') or '—'))
+                    self._mc_disp_sub.set('pezzi' if bp.get('disponibilita') else '')
+                    if costo and bprz:
+                        dd = (bprz - costo) / costo * 100.0
+                        self._mc_vs.set(f"{dd:+.0f}%")
+                        self._mc_vs_lbl.config(
+                            fg=ACCENT2 if dd < -0.5 else (DANGER if dd > 0.5 else FG))
+                        self._mc_vs_sub.set('compri meglio' if dd < -0.5
+                                            else ('più caro' if dd > 0.5 else ''))
+                    else:
+                        self._mc_vs.set('—')
+                        self._mc_vs_sub.set('')
+                        self._mc_vs_lbl.config(fg=FG)
+
                     def _vs(p):
                         if not costo or not p:
                             return '—'
@@ -2551,6 +2585,23 @@ def _btn(parent, text, command, color=None):
     b.bind('<Enter>', lambda _e: b.config(bg=hover))
     b.bind('<Leave>', lambda _e: b.config(bg=color))
     return b
+
+
+def _metric_card(parent, title):
+    """Riquadro 'metrica': titolo piccolo + valore grande + sottotitolo.
+    Ritorna (valore_var, sottotitolo_var, label_valore) per aggiornarli."""
+    c = tk.Frame(parent, bg=CARD)
+    c.pack(side='left', fill='x', expand=True, padx=4)
+    tk.Label(c, text=title, font=FONT_S, bg=CARD, fg=FG2,
+             anchor='w').pack(fill='x', padx=12, pady=(9, 0))
+    val = tk.StringVar(value='—')
+    lbl = tk.Label(c, textvariable=val, font=('Segoe UI', 18, 'bold'),
+                   bg=CARD, fg=FG, anchor='w')
+    lbl.pack(fill='x', padx=12)
+    sub = tk.StringVar(value='')
+    tk.Label(c, textvariable=sub, font=FONT_S, bg=CARD, fg=FG2,
+             anchor='w').pack(fill='x', padx=12, pady=(0, 9))
+    return val, sub, lbl
 
 
 def _log_box(parent, height=7):
