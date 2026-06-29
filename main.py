@@ -479,7 +479,7 @@ class IDUApp(tk.Tk):
         cols_a = ('codice', 'descrizione', 'um', 'costo_base', 'n_fornitori')
         self.art_tree = _tree(f, cols_a,
                               headings=('Codice', 'Descrizione', 'UM', 'Prezzo Base', '# Fornitori'),
-                              widths=(120, 380, 50, 100, 90))
+                              widths=(120, 380, 50, 100, 90), height=6)
         self.art_tree.bind('<<TreeviewSelect>>', self._on_article_select)
 
         # Dettaglio fornitori
@@ -488,13 +488,13 @@ class IDUApp(tk.Tk):
         self.forn_tree = _tree(f, cols_f,
                                headings=('Cod. Mexal', 'Nome', 'Cod. Fornitore',
                                          'Prezzo Forn.', 'Prezzo Base', 'Ultima verifica'),
-                               widths=(100, 160, 120, 100, 100, 130))
+                               widths=(100, 160, 120, 100, 100, 130), height=4)
         # Storico
         _btn(f, "📋 Storico prezzi articolo", self._show_history, color=ACCENT).pack(
             anchor='e', padx=20, pady=4)
 
         # ── Crea nuovo articolo (prodotto non ancora in Mexal) ──
-        _section(f, "➕ Crea nuovo articolo (prodotto non ancora presente in Mexal)")
+        _section(f, "➕ Crea nuovo articolo")
         naf = tk.LabelFrame(f, text=" Nuovo articolo ", bg=BG2, fg=FG2, font=FONT_S)
         naf.pack(fill='x', padx=20, pady=4)
 
@@ -2400,8 +2400,11 @@ def _tree(parent, columns, headings, widths, height=8):
     t = ttk.Treeview(frame, columns=columns, show='headings',
                      height=height, yscrollcommand=sb.set)
     sb.config(command=t.yview)
+    t._sort_dir = {}
+    t._headings = dict(zip(columns, headings))
     for col, hdr, w in zip(columns, headings, widths):
-        t.heading(col, text=hdr)
+        # intestazione cliccabile → ordina per quella colonna
+        t.heading(col, text=hdr, command=lambda c=col: _sort_tree_column(t, c))
         t.column(col, width=w, stretch=(w > 200))
     t.pack(side='left', fill='x', expand=True)
     sb.pack(side='right', fill='y')
@@ -2417,6 +2420,52 @@ def _tree(parent, columns, headings, widths, height=8):
 
     t.insert = _insert
     return t
+
+
+def _sort_tree_column(tree, col):
+    """
+    Ordina il Treeview per la colonna cliccata, alternando crescente/decrescente.
+    Sceglie l'ordinamento numerico se tutti i valori sono numeri (prezzi, conteggi),
+    altrimenti testuale (codici, descrizioni). Ripristina le righe alternate e
+    mostra una freccia ▲/▼ nell'intestazione.
+    """
+    items = [(tree.set(iid, col), iid) for iid in tree.get_children('')]
+    if not items:
+        return
+
+    def _num(s):
+        s = (s or '').strip()
+        if s in ('', '—'):
+            return None
+        x = s.replace('€', '').replace('%', '').replace('+', '').strip()
+        x = x.replace('.', '').replace(',', '.')   # formato italiano
+        try:
+            return float(x)
+        except ValueError:
+            return None
+
+    valori = [v for v, _ in items if (v or '').strip() not in ('', '—')]
+    numerico = bool(valori) and all(_num(v) is not None for v in valori)
+    rev = tree._sort_dir.get(col, False)
+    if numerico:
+        items.sort(key=lambda it: (_num(it[0]) is None, _num(it[0]) or 0.0), reverse=rev)
+    else:
+        items.sort(key=lambda it: (it[0] or '').lower(), reverse=rev)
+
+    for idx, (_v, iid) in enumerate(items):
+        tree.move(iid, '', idx)
+        tags = tuple(tg for tg in tree.item(iid, 'tags') if tg != 'oddrow')
+        if idx % 2:
+            tags += ('oddrow',)
+        tree.item(iid, tags=tags)
+
+    tree._sort_dir[col] = not rev
+    base = getattr(tree, '_headings', {})
+    for c in tree['columns']:
+        txt = base.get(c, tree.heading(c, 'text'))
+        if c == col:
+            txt += ' ▼' if rev else ' ▲'
+        tree.heading(c, text=txt)
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
