@@ -137,35 +137,54 @@ class IDUApp(tk.Tk):
 
         content = tk.Frame(body, bg=BG2)
         content.pack(side='left', fill='both', expand=True)
-        content.grid_rowconfigure(0, weight=1)
-        content.grid_columnconfigure(0, weight=1)
 
-        # Le schede ora sono frame sovrapposti nello stesso riquadro: si alza
-        # quella attiva con tkraise() invece di usare il Notebook.
-        self.tab_import    = tk.Frame(content, bg=BG2)
-        self.tab_articles  = tk.Frame(content, bg=BG2)
-        self.tab_documenti = tk.Frame(content, bg=BG2)
-        self.tab_upload    = tk.Frame(content, bg=BG2)
-        self.tab_pdf_order = tk.Frame(content, bg=BG2)
-        self.tab_scraper   = tk.Frame(content, bg=BG2)
-        self.tab_batch     = tk.Frame(content, bg=BG2)
-        self.tab_suppliers = tk.Frame(content, bg=BG2)
-        self.tab_creds     = tk.Frame(content, bg=BG2)
-        self.tab_schedule  = tk.Frame(content, bg=BG2)
+        # Header con icona + titolo della sezione corrente
+        self._header = tk.Frame(content, bg=BG2)
+        self._header.pack(fill='x', side='top')
+        self._header_icon = tk.Label(self._header, text='', font=('Segoe UI Emoji', 15),
+                                     bg=BG2, fg=ACCENT)
+        self._header_icon.pack(side='left', padx=(20, 8), pady=12)
+        self._header_title = tk.Label(self._header, text='', font=FONT_H, bg=BG2, fg=FG)
+        self._header_title.pack(side='left', pady=12)
+        tk.Frame(content, bg=CARD, height=1).pack(fill='x', side='top')
 
-        # Voci di navigazione: (icona, etichetta, frame)
-        self._nav_items = [
-            ('📥', 'Importa / esporta', self.tab_import),
-            ('🔍', 'Articoli',          self.tab_articles),
-            ('🧾', 'Documenti',         self.tab_documenti),
-            ('💾', 'Upload listino',    self.tab_upload),
-            ('🛒', 'Ordine',            self.tab_pdf_order),
-            ('🌐', 'Ricerca portali',   self.tab_scraper),
-            ('🚀', 'Ricerca massiva',   self.tab_batch),
-            ('🏭', 'Fornitori',         self.tab_suppliers),
-            ('🔐', 'Credenziali',       self.tab_creds),
-            ('🕐', 'Pianificazione',    self.tab_schedule),
+        # Contenitore schede: frame sovrapposti, si alza l'attiva con tkraise()
+        tabwrap = tk.Frame(content, bg=BG2)
+        tabwrap.pack(fill='both', expand=True, side='top')
+        tabwrap.grid_rowconfigure(0, weight=1)
+        tabwrap.grid_columnconfigure(0, weight=1)
+
+        self.tab_import    = tk.Frame(tabwrap, bg=BG2)
+        self.tab_articles  = tk.Frame(tabwrap, bg=BG2)
+        self.tab_documenti = tk.Frame(tabwrap, bg=BG2)
+        self.tab_upload    = tk.Frame(tabwrap, bg=BG2)
+        self.tab_pdf_order = tk.Frame(tabwrap, bg=BG2)
+        self.tab_scraper   = tk.Frame(tabwrap, bg=BG2)
+        self.tab_batch     = tk.Frame(tabwrap, bg=BG2)
+        self.tab_suppliers = tk.Frame(tabwrap, bg=BG2)
+        self.tab_creds     = tk.Frame(tabwrap, bg=BG2)
+        self.tab_schedule  = tk.Frame(tabwrap, bg=BG2)
+
+        # Navigazione raggruppata: (titolo gruppo, [(icona, etichetta, frame), …])
+        self._nav_groups = [
+            ('Dati Mexal', [
+                ('📥', 'Importa / esporta', self.tab_import),
+                ('🔍', 'Articoli',          self.tab_articles),
+                ('🧾', 'Documenti',         self.tab_documenti),
+            ]),
+            ('Prezzi e ordini', [
+                ('💾', 'Upload listino',    self.tab_upload),
+                ('🛒', 'Ordine',            self.tab_pdf_order),
+                ('🌐', 'Ricerca portali',   self.tab_scraper),
+                ('🚀', 'Ricerca massiva',   self.tab_batch),
+            ]),
+            ('Configurazione', [
+                ('🏭', 'Fornitori',         self.tab_suppliers),
+                ('🔐', 'Credenziali',       self.tab_creds),
+                ('🕐', 'Pianificazione',    self.tab_schedule),
+            ]),
         ]
+        self._nav_items = [it for _g, items in self._nav_groups for it in items]
         for _ic, _lb, fr in self._nav_items:
             fr.grid(row=0, column=0, sticky='nsew')
 
@@ -195,33 +214,41 @@ class IDUApp(tk.Tk):
     def _build_sidebar(self):
         s = self.sidebar
         logo = tk.Frame(s, bg=SIDEBAR_BG)
-        logo.pack(fill='x', padx=14, pady=(16, 14))
+        logo.pack(fill='x', padx=14, pady=(16, 8))
         tk.Label(logo, text='💧', font=('Segoe UI Emoji', 18),
                  bg=SIDEBAR_BG, fg=ACCENT).pack(side='left')
         tk.Label(logo, text='IDU Price\nManager', font=FONT_B, justify='left',
                  bg=SIDEBAR_BG, fg=FG).pack(side='left', padx=8)
 
         self._nav_rows = {}
-        for icon, label, frame in self._nav_items:
-            row = tk.Frame(s, bg=SIDEBAR_BG, cursor='hand2')
-            row.pack(fill='x')
-            bar = tk.Frame(row, bg=SIDEBAR_BG, width=3)
-            bar.pack(side='left', fill='y')
-            inner = tk.Frame(row, bg=SIDEBAR_BG)
-            inner.pack(side='left', fill='x', expand=True, padx=(10, 8), pady=7)
-            ic = tk.Label(inner, text=icon, font=FONT_EMOJI, bg=SIDEBAR_BG, fg=FG2)
-            ic.pack(side='left')
-            tx = tk.Label(inner, text=label, font=FONT_S, bg=SIDEBAR_BG, fg=FG2)
-            tx.pack(side='left', padx=9)
-            self._nav_rows[frame] = (row, bar, inner, ic, tx)
-            for w in (row, inner, ic, tx):
-                w.bind('<Button-1>', lambda _e, fr=frame: self._show_tab(fr))
-                w.bind('<Enter>', lambda _e, fr=frame: self._nav_hover(fr, True))
-                w.bind('<Leave>', lambda _e, fr=frame: self._nav_hover(fr, False))
+        for gtitle, items in self._nav_groups:
+            tk.Label(s, text=gtitle.upper(), font=('Segoe UI', 8, 'bold'),
+                     bg=SIDEBAR_BG, fg=FG2, anchor='w').pack(
+                         fill='x', padx=16, pady=(11, 2))
+            for icon, label, frame in items:
+                row = tk.Frame(s, bg=SIDEBAR_BG, cursor='hand2')
+                row.pack(fill='x')
+                bar = tk.Frame(row, bg=SIDEBAR_BG, width=3)
+                bar.pack(side='left', fill='y')
+                inner = tk.Frame(row, bg=SIDEBAR_BG)
+                inner.pack(side='left', fill='x', expand=True, padx=(10, 8), pady=6)
+                ic = tk.Label(inner, text=icon, font=FONT_EMOJI, bg=SIDEBAR_BG, fg=FG2)
+                ic.pack(side='left')
+                tx = tk.Label(inner, text=label, font=FONT_S, bg=SIDEBAR_BG, fg=FG2)
+                tx.pack(side='left', padx=9)
+                self._nav_rows[frame] = (row, bar, inner, ic, tx)
+                for w in (row, inner, ic, tx):
+                    w.bind('<Button-1>', lambda _e, fr=frame: self._show_tab(fr))
+                    w.bind('<Enter>', lambda _e, fr=frame: self._nav_hover(fr, True))
+                    w.bind('<Leave>', lambda _e, fr=frame: self._nav_hover(fr, False))
 
     def _show_tab(self, frame):
         frame.tkraise()
         self._active_tab = frame
+        meta = next(((i, l) for i, l, fr in self._nav_items if fr is frame), None)
+        if meta and hasattr(self, '_header_title'):
+            self._header_icon.config(text=meta[0])
+            self._header_title.config(text=meta[1])
         for fr, (row, bar, inner, ic, tx) in self._nav_rows.items():
             on = (fr is frame)
             bg = NAV_ACTIVE_BG if on else SIDEBAR_BG
@@ -1820,6 +1847,13 @@ class IDUApp(tk.Tk):
         self.batch_progress = ttk.Progressbar(rb, mode='determinate')
         self.batch_progress.pack(side='left', fill='x', expand=True, padx=8)
 
+        # ── Schede metriche ──
+        mcb = tk.Frame(f, bg=BG2)
+        mcb.pack(fill='x', padx=16, pady=(4, 4))
+        self._bm_tot, self._bm_tot_sub, _ = _metric_card(mcb, 'Risultati')
+        self._bm_prz, self._bm_prz_sub, _ = _metric_card(mcb, 'Con prezzo')
+        self._bm_sel, self._bm_sel_sub, _ = _metric_card(mcb, 'Selezionati')
+
         # ── Tabella risultati ──
         tframe = tk.Frame(f, bg=BG2)
         tframe.pack(fill='both', expand=True, padx=20, pady=4)
@@ -1938,6 +1972,10 @@ class IDUApp(tk.Tk):
                         prezzo_s, stato_lbl.get(res.get('stato'), '—')))
             self._batch_results[iid] = res
             self._batch_checked.add(iid)
+        n = len(self._batch_results)
+        npr = sum(1 for r in self._batch_results.values() if r.get('prezzo'))
+        self._bm_tot.set(str(n)); self._bm_tot_sub.set('fornitori trovati')
+        self._bm_prz.set(str(npr)); self._bm_prz_sub.set('con prezzo')
         self._update_batch_count()
         if not risultati:
             self._log(self.batch_log, "Nessun risultato trovato.")
@@ -1975,6 +2013,9 @@ class IDUApp(tk.Tk):
         tot = len(self._batch_results)
         sel = len(self._batch_checked)
         self._batch_count_var.set(f"{sel}/{tot} selezionati" if tot else '')
+        if hasattr(self, '_bm_sel'):
+            self._bm_sel.set(str(sel))
+            self._bm_sel_sub.set(f'su {tot}' if tot else '')
 
     def _save_batch_results(self):
         import threading as _th
