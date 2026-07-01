@@ -19,6 +19,7 @@ Guida passo-passo per importare una bolla/fattura fornitore e aggiornare in Mexa
 4. Premi **✅ Applica**: aggiorna il database e genera **tutti i file in un colpo solo**
    nella cartella Mexal:
    - `anar_idu.csv` — articoli nuovi, codici fornitore, **costo**
+   - `anli_idu.csv` — **listini** calcolati (costo × ricarico categoria)
    - `carico_mote.csv` + `carico_mori.csv` — documento di **carico** (giacenze)
 
    *(Richiede che `anar_idu.csv` sia già nella cartella Mexal: esportalo una volta da

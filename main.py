@@ -954,11 +954,13 @@ class IDUApp(tk.Tk):
         mote_out = os.path.join(mexal_dir, 'carico_mote.csv')
         mori_out = os.path.join(mexal_dir, 'carico_mori.csv')
         anar_orig = os.path.join(mexal_dir, 'anar_idu.csv')
+        anli_out = os.path.join(mexal_dir, 'anli_idu.csv')
         if not messagebox.askyesno(
                 "Conferma",
                 "Verranno aggiornati codici e prezzi nel database e generati i file "
                 "per Mexal in un colpo solo:\n"
                 "  • anar_idu.csv (articoli, codici, costo)\n"
+                "  • anli_idu.csv (listini calcolati)\n"
                 + (f"  • carico_mote.csv + carico_mori.csv (giacenze, causale {causale})\n"
                    if fai_carico else "")
                 + "\nProcedere?"):
@@ -974,8 +976,8 @@ class IDUApp(tk.Tk):
                     log_cb=lambda m: self._log(self.doc_log, m))
                 car = rep.get('carico')
 
-                # Genera anche l'anar aggiornato, così è tutto in un colpo solo
-                anar_ok = False
+                # Genera anche anar + anli aggiornati, così è tutto in un colpo solo
+                anar_ok = anli_ok = False
                 if os.path.exists(anar_orig):
                     try:
                         export_mexal.export_to_mexal_csv(
@@ -984,6 +986,13 @@ class IDUApp(tk.Tk):
                         anar_ok = True
                     except Exception as ee:
                         self._log(self.doc_log, f"⚠ anar non generato: {ee}")
+                    try:
+                        export_mexal.genera_anli(
+                            anar_orig, anli_out,
+                            log_cb=lambda m: self._log(self.doc_log, m))
+                        anli_ok = True
+                    except Exception as ee:
+                        self._log(self.doc_log, f"⚠ anli non generato: {ee}")
                 else:
                     self._log(self.doc_log,
                         "⚠ anar_idu.csv non trovato nella cartella Mexal: esportalo "
@@ -996,10 +1005,12 @@ class IDUApp(tk.Tk):
                        "📁 File generati nella cartella Mexal:\n")
                 if anar_ok:
                     msg += f"   • {anar_orig}\n"
+                if anli_ok:
+                    msg += f"   • {anli_out}\n"
                 if car:
                     msg += f"   • {mote_out}\n   • {mori_out}\n"
                 msg += ("\nIn Mexal, nell'ordine:\n"
-                        "  1) importa anar (Anagrafica articoli)\n"
+                        "  1) importa anar+anli (Anagrafica articoli)\n"
                         "  2) importa carico (Movimenti di magazzino)\n"
                         "  3) Ricalcolo listini (Servizi → Variazioni → Magazzino)")
                 self._log(self.doc_log, msg)

@@ -260,6 +260,56 @@ def export_to_mexal_csv(csv_originale: str, output_path: str,
     }
 
 
+def genera_anli(anar_path: str, anli_out: str, log_cb=None):
+    """
+    Genera anli_idu.csv con i 4 listini calcolati (costo × ricarico categoria)
+    per ogni articolo distinto dell'anar. Formato: `_ARCOD;_ARPRZ(1..4);`.
+    I listini si calcolano da `_ARCUL` (costo ultimo) × ricarico della categoria
+    prezzi `_ARLIS` (vedi listini.py). Scrittura atomica (temp + os.replace).
+    Ritorna {'articoli': n, 'output': path}.
+    """
+    import csv, os, tempfile
+
+    def _num(x):
+        x = (x or '').strip()
+        if not x:
+            return None
+        try:
+            return float(x.replace('.', '').replace(',', '.'))
+        except ValueError:
+            return None
+
+    def _fmt(v):
+        return f"{float(v):.4f}".replace('.', ',')
+
+    rows, seen = [], set()
+    with open(anar_path, encoding='latin-1', newline='') as fh:
+        rd = csv.DictReader(fh, delimiter=';')
+        for r in rd:
+            cod = (r.get('_ARCOD') or '').strip()
+            if not cod or cod in seen:
+                continue
+            seen.add(cod)
+            lis = listini.calcola_listini(_num(r.get('_ARCUL')),
+                                          (r.get('_ARLIS') or '').strip())
+            if lis:
+                rows.append([cod, _fmt(lis[1]), _fmt(lis[2]),
+                             _fmt(lis[3]), _fmt(lis[4]), ''])
+
+    out_dir = os.path.dirname(os.path.abspath(anli_out)) or '.'
+    fd, tmp = tempfile.mkstemp(suffix='.csv', dir=out_dir)
+    os.close(fd)
+    with open(tmp, 'w', encoding='latin-1', newline='') as fh:
+        w = csv.writer(fh, delimiter=';')
+        w.writerow(['_ARCOD', '_ARPRZ(1)', '_ARPRZ(2)', '_ARPRZ(3)', '_ARPRZ(4)', ''])
+        w.writerows(rows)
+    os.replace(tmp, anli_out)
+    if log_cb:
+        log_cb(f"✅ anli generato: {len(rows)} articoli con listini calcolati.")
+    logger.info(f"anli generato: {len(rows)} articoli -> {anli_out}")
+    return {'articoli': len(rows), 'output': anli_out}
+
+
 def _format_mexal_number(val) -> str:
     """
     Converte un numero nel formato Mexal: 4 decimali fissi con virgola come
