@@ -1009,8 +1009,12 @@ class IDUApp(tk.Tk):
                        "📁 File generati nella cartella Mexal:\n")
                 if anar_ok:
                     msg += f"   • {anar_out}\n"
+                else:
+                    msg += "   ⚠ anar NON generato (vedi log sopra)\n"
                 if anli_ok:
                     msg += f"   • {anli_out}\n"
+                elif anar_ok:
+                    msg += "   ⚠ anli NON generato (vedi log sopra)\n"
                 if car:
                     msg += f"   • {mote_out}\n   • {mori_out}\n"
                 msg += ("\nIn Mexal, nell'ordine:\n"
