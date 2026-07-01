@@ -949,10 +949,12 @@ class IDUApp(tk.Tk):
         fai_carico = self.doc_carico_var.get()
         causale = self.doc_causale_var.get().strip() or 'CL'
         magazzino = self.doc_mag_var.get().strip() or '1'
-        # il carico si salva nella cartella dati di Mexal
-        mexal_dir = os.path.dirname(carico.MOTE_SRC)
-        mote_out = os.path.join(mexal_dir, 'carico_mote.csv')
-        mori_out = os.path.join(mexal_dir, 'carico_mori.csv')
+        # il carico si salva nella cartella dati di Mexal, coi nomi che Mexal
+        # rilegge in import (mote_idu.csv / mori_idu.csv). Il modello resta
+        # preservato a parte (mote_idu_modello.csv), vedi carico.py.
+        mexal_dir = os.path.dirname(carico.MOTE_DUMP)
+        mote_out = os.path.join(mexal_dir, 'mote_idu.csv')
+        mori_out = os.path.join(mexal_dir, 'mori_idu.csv')
         anar_orig = os.path.join(mexal_dir, 'anar_idu.csv')
         anli_out = os.path.join(mexal_dir, 'anli_idu.csv')
         if not messagebox.askyesno(
@@ -961,7 +963,7 @@ class IDUApp(tk.Tk):
                 "per Mexal in un colpo solo:\n"
                 "  • anar_idu.csv (articoli, codici, costo)\n"
                 "  • anli_idu.csv (listini calcolati)\n"
-                + (f"  • carico_mote.csv + carico_mori.csv (giacenze, causale {causale})\n"
+                + (f"  • mote_idu.csv + mori_idu.csv (carico/giacenze, causale {causale})\n"
                    if fai_carico else "")
                 + "\nProcedere?"):
             return

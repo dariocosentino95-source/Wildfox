@@ -11,13 +11,34 @@ Strategia sicura: usa come modello la struttura di un documento reale già espor
 ⚠️ Crea documenti in Mexal: provare SEMPRE prima su un movimento/azienda di test.
 """
 import csv
+import os
+import shutil
 import datetime
 import logging
 
 logger = logging.getLogger(__name__)
 
-MOTE_SRC = r"C:\mexal\dati\datiaz\idu\mote_idu.csv"
-MORI_SRC = r"C:\mexal\dati\datiaz\idu\mori_idu.csv"
+# Dump dei movimenti esportati da Mexal: sono anche i nomi che Mexal RILEGGE
+# in import (Movimenti di magazzino), quindi il carico viene scritto QUI.
+MOTE_DUMP = r"C:\mexal\dati\datiaz\idu\mote_idu.csv"
+MORI_DUMP = r"C:\mexal\dati\datiaz\idu\mori_idu.csv"
+
+# Modello STABILE per clonare un documento reale: copia una-tantum del dump.
+# Serve perché scrivendo il carico su mote_idu.csv/mori_idu.csv sovrascriveremmo
+# il dump-modello; il modello resta così intatto tra una bolla e l'altra.
+MOTE_SRC = r"C:\mexal\dati\datiaz\idu\mote_idu_modello.csv"
+MORI_SRC = r"C:\mexal\dati\datiaz\idu\mori_idu_modello.csv"
+
+
+def _ensure_template():
+    """Crea i file modello (copia del dump) se non esistono ancora."""
+    for dump, tmpl in ((MOTE_DUMP, MOTE_SRC), (MORI_DUMP, MORI_SRC)):
+        try:
+            if not os.path.exists(tmpl) and os.path.exists(dump):
+                shutil.copyfile(dump, tmpl)
+                logger.info(f"Modello carico creato: {tmpl}")
+        except Exception as e:
+            logger.warning(f"Impossibile creare il modello {tmpl}: {e}")
 
 # Campi TESTATA da azzerare (solo dati specifici del documento d'origine).
 # Usando come modello un documento della STESSA causale, i campi "modo documento"
@@ -81,6 +102,7 @@ def genera_carico(items, fornitore_codice, fornitore_nome,
     Come modello usa un documento REALE della stessa causale (così i campi
     "modo documento" sono già validi); se non esiste, ripiega su 'FF'.
     """
+    _ensure_template()   # garantisce il modello stabile (copia del dump)
     sigla_tmpl = template_sigla or causale
     cols_mote, tmpl_mote = _load_template(MOTE_SRC, sigla_tmpl)
     cols_mori, tmpl_mori = _load_template(MORI_SRC, sigla_tmpl)
