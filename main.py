@@ -949,22 +949,23 @@ class IDUApp(tk.Tk):
         fai_carico = self.doc_carico_var.get()
         causale = self.doc_causale_var.get().strip() or 'CL'
         magazzino = self.doc_mag_var.get().strip() or '1'
-        # il carico si salva nella cartella dati di Mexal, coi nomi che Mexal
-        # rilegge in import (mote_idu.csv / mori_idu.csv). Il modello resta
-        # preservato a parte (mote_idu_modello.csv), vedi carico.py.
-        mexal_dir = os.path.dirname(carico.MOTE_DUMP)
-        mote_out = os.path.join(mexal_dir, 'mote_idu.csv')
-        mori_out = os.path.join(mexal_dir, 'mori_idu.csv')
+        # I file generati escono nella CARTELLA MEXAL col suffisso _AGGIORNATO,
+        # così NON sovrascrivono i file originali esportati da Mexal (che restano
+        # come struttura/modello). In import li selezioni tu.
+        mexal_dir = os.path.dirname(carico.MOTE_SRC)
+        mote_out = os.path.join(mexal_dir, 'mote_idu_AGGIORNATO.csv')
+        mori_out = os.path.join(mexal_dir, 'mori_idu_AGGIORNATO.csv')
         anar_orig = os.path.join(mexal_dir, 'anar_idu.csv')
-        anli_out = os.path.join(mexal_dir, 'anli_idu.csv')
+        anar_out = os.path.join(mexal_dir, 'anar_idu_AGGIORNATO.csv')
+        anli_out = os.path.join(mexal_dir, 'anli_idu_AGGIORNATO.csv')
         if not messagebox.askyesno(
                 "Conferma",
                 "Verranno aggiornati codici e prezzi nel database e generati i file "
-                "per Mexal in un colpo solo:\n"
-                "  • anar_idu.csv (articoli, codici, costo)\n"
-                "  • anli_idu.csv (listini calcolati)\n"
-                + (f"  • mote_idu.csv + mori_idu.csv (carico/giacenze, causale {causale})\n"
-                   if fai_carico else "")
+                "per Mexal (nella cartella Mexal) in un colpo solo:\n"
+                "  • anar_idu_AGGIORNATO.csv (articoli, codici, costo)\n"
+                "  • anli_idu_AGGIORNATO.csv (listini calcolati)\n"
+                + (f"  • mote_idu_AGGIORNATO.csv + mori_idu_AGGIORNATO.csv "
+                   f"(carico/giacenze, causale {causale})\n" if fai_carico else "")
                 + "\nProcedere?"):
             return
         self.doc_log.delete('1.0', 'end')
@@ -978,19 +979,20 @@ class IDUApp(tk.Tk):
                     log_cb=lambda m: self._log(self.doc_log, m))
                 car = rep.get('carico')
 
-                # Genera anche anar + anli aggiornati, così è tutto in un colpo solo
+                # Genera anche anar + anli aggiornati (suffisso _AGGIORNATO)
                 anar_ok = anli_ok = False
                 if os.path.exists(anar_orig):
                     try:
                         export_mexal.export_to_mexal_csv(
-                            anar_orig, anar_orig, ricalcola_listini=False,
+                            anar_orig, anar_out, ricalcola_listini=False,
                             log_cb=lambda m: self._log(self.doc_log, m))
                         anar_ok = True
                     except Exception as ee:
                         self._log(self.doc_log, f"⚠ anar non generato: {ee}")
                     try:
+                        # i listini si calcolano dai costi aggiornati (anar_out)
                         export_mexal.genera_anli(
-                            anar_orig, anli_out,
+                            anar_out if anar_ok else anar_orig, anli_out,
                             log_cb=lambda m: self._log(self.doc_log, m))
                         anli_ok = True
                     except Exception as ee:
@@ -998,7 +1000,7 @@ class IDUApp(tk.Tk):
                 else:
                     self._log(self.doc_log,
                         "⚠ anar_idu.csv non trovato nella cartella Mexal: esportalo "
-                        "una volta da Mexal, poi verrà aggiornato in automatico.")
+                        "una volta da Mexal (serve come struttura).")
 
                 msg = (f"Aggiornati (già collegati): {len(rep['aggiornati'])}\n"
                        f"Auto-collegati: {len(rep['creati'])}\n"
@@ -1006,7 +1008,7 @@ class IDUApp(tk.Tk):
                        f"Non risolti (da collegare): {len(rep['non_risolti'])}\n\n"
                        "📁 File generati nella cartella Mexal:\n")
                 if anar_ok:
-                    msg += f"   • {anar_orig}\n"
+                    msg += f"   • {anar_out}\n"
                 if anli_ok:
                     msg += f"   • {anli_out}\n"
                 if car:

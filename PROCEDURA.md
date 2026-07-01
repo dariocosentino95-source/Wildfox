@@ -17,14 +17,13 @@ Guida passo-passo per importare una bolla/fattura fornitore e aggiornare in Mexa
    - 🔴 **nuovo** — non riconosciuto → serve il **collegamento guidato** (scegli tu l'articolo Mexal)
      oppure, se non esiste, crealo in **Articoli → Crea nuovo articolo**.
 4. Premi **✅ Applica**: aggiorna il database e genera **tutti i file in un colpo solo**
-   nella cartella Mexal:
-   - `anar_idu.csv` — articoli nuovi, codici fornitore, **costo**
-   - `anli_idu.csv` — **listini** calcolati (costo × ricarico categoria)
-   - `mote_idu.csv` + `mori_idu.csv` — documento di **carico** (giacenze)
-     *(il modello per la clonazione resta salvato a parte in `mote_idu_modello.csv`)*
+   nella **cartella Mexal**, col suffisso `_AGGIORNATO` (così non sovrascrivono gli originali):
+   - `anar_idu_AGGIORNATO.csv` — articoli nuovi, codici fornitore, **costo**
+   - `anli_idu_AGGIORNATO.csv` — **listini** calcolati (costo × ricarico categoria)
+   - `mote_idu_AGGIORNATO.csv` + `mori_idu_AGGIORNATO.csv` — documento di **carico** (giacenze)
 
-   *(Richiede che `anar_idu.csv` sia già nella cartella Mexal: esportalo una volta da
-   Mexal, poi l'app lo aggiorna in automatico ad ogni bolla.)*
+   *(Richiede che `anar_idu.csv` originale sia già nella cartella Mexal: serve come struttura.
+   In import, in Mexal, seleziona i file `*_AGGIORNATO.csv`.)*
 
 ### Fase 2 — In Mexal
 
