@@ -262,11 +262,12 @@ def export_to_mexal_csv(csv_originale: str, output_path: str,
 
 def genera_anli(anar_path: str, anli_out: str, log_cb=None):
     """
-    Genera anli_idu.csv con i 4 listini calcolati (costo × ricarico categoria)
-    per ogni articolo distinto dell'anar. Formato: `_ARCOD;_ARPRZ(1..4);`.
-    I listini si calcolano da `_ARCUL` (costo ultimo) × ricarico della categoria
-    prezzi `_ARLIS` (vedi listini.py). Scrittura atomica (temp + os.replace).
-    Ritorna {'articoli': n, 'output': path}.
+    Genera anli_idu.csv con i 4 listini calcolati per ogni articolo distinto
+    dell'anar. Formato: `_ARCOD;_ARPRZ(1..4);`.
+    Listino = costo `_ARCUL` × ricarico della categoria prezzi `_ARLIS`
+    (listini.py) e poi **IVA inclusa** (× 1 + `_ARIVA`/100): Mexal salva l'anli
+    coi prezzi lordi (verificato: listino netto × 1,22 con IVA 22%).
+    Scrittura atomica (temp + os.replace). Ritorna {'articoli': n, 'output': path}.
     """
     import csv, os, tempfile
 
@@ -293,8 +294,10 @@ def genera_anli(anar_path: str, anli_out: str, log_cb=None):
             lis = listini.calcola_listini(_num(r.get('_ARCUL')),
                                           (r.get('_ARLIS') or '').strip())
             if lis:
-                rows.append([cod, _fmt(lis[1]), _fmt(lis[2]),
-                             _fmt(lis[3]), _fmt(lis[4]), ''])
+                iva = _num(r.get('_ARIVA'))
+                m = 1 + iva / 100.0 if iva else 1.0   # da netto a lordo (IVA)
+                rows.append([cod, _fmt(lis[1] * m), _fmt(lis[2] * m),
+                             _fmt(lis[3] * m), _fmt(lis[4] * m), ''])
 
     out_dir = os.path.dirname(os.path.abspath(anli_out)) or '.'
     fd, tmp = tempfile.mkstemp(suffix='.csv', dir=out_dir)
