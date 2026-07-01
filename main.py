@@ -821,7 +821,7 @@ class IDUApp(tk.Tk):
         tk.Entry(row3, textvariable=self.doc_mag_var, font=FONT_S, bg=CARD, fg=FG,
                  insertbackground=FG, width=4).pack(side='left', padx=4)
 
-        _btn(f, "✅ Applica (codici + prezzi + carico magazzino)",
+        _btn(f, "✅ Applica — genera anar + carico (tutto in un colpo)",
              self._run_doc_apply, color=ACCENT2).pack(anchor='w', padx=20, pady=6)
         self.doc_log = _log_box(f, height=6)
         self._doc_refresh_forn_combo()
@@ -953,12 +953,15 @@ class IDUApp(tk.Tk):
         mexal_dir = os.path.dirname(carico.MOTE_SRC)
         mote_out = os.path.join(mexal_dir, 'carico_mote.csv')
         mori_out = os.path.join(mexal_dir, 'carico_mori.csv')
+        anar_orig = os.path.join(mexal_dir, 'anar_idu.csv')
         if not messagebox.askyesno(
                 "Conferma",
-                "Verranno aggiornati codici e prezzi nel database"
-                + (f" e generato il carico (causale {causale}, mag. {magazzino})"
+                "Verranno aggiornati codici e prezzi nel database e generati i file "
+                "per Mexal in un colpo solo:\n"
+                "  • anar_idu.csv (articoli, codici, costo)\n"
+                + (f"  • carico_mote.csv + carico_mori.csv (giacenze, causale {causale})\n"
                    if fai_carico else "")
-                + ".\nL'anar lo generi poi da '📥 Importa / Esporta Mexal'.\nProcedere?"):
+                + "\nProcedere?"):
             return
         self.doc_log.delete('1.0', 'end')
 
@@ -970,17 +973,35 @@ class IDUApp(tk.Tk):
                     mote_out=mote_out, mori_out=mori_out,
                     log_cb=lambda m: self._log(self.doc_log, m))
                 car = rep.get('carico')
+
+                # Genera anche l'anar aggiornato, così è tutto in un colpo solo
+                anar_ok = False
+                if os.path.exists(anar_orig):
+                    try:
+                        export_mexal.export_to_mexal_csv(
+                            anar_orig, anar_orig, ricalcola_listini=False,
+                            log_cb=lambda m: self._log(self.doc_log, m))
+                        anar_ok = True
+                    except Exception as ee:
+                        self._log(self.doc_log, f"⚠ anar non generato: {ee}")
+                else:
+                    self._log(self.doc_log,
+                        "⚠ anar_idu.csv non trovato nella cartella Mexal: esportalo "
+                        "una volta da Mexal, poi verrà aggiornato in automatico.")
+
                 msg = (f"Aggiornati (già collegati): {len(rep['aggiornati'])}\n"
                        f"Auto-collegati: {len(rep['creati'])}\n"
                        f"Collegati manualmente: {len(rep['collegati_manuale'])}\n"
-                       f"Non risolti (ancora da collegare): {len(rep['non_risolti'])}\n")
+                       f"Non risolti (da collegare): {len(rep['non_risolti'])}\n\n"
+                       "📁 File generati nella cartella Mexal:\n")
+                if anar_ok:
+                    msg += f"   • {anar_orig}\n"
                 if car:
-                    msg += (f"\n📦 CARICO generato (causale {car['causale']}, "
-                            f"{car['righe']} righe):\n   {mote_out}\n   {mori_out}\n"
-                            "→ Importalo in Mexal: Trasferimento archivi → Caricamento "
-                            "ASCII/CSV → Movimenti di magazzino.\n")
-                msg += ("ORA per i prezzi/codici: '📥 Importa / Esporta Mexal' → "
-                        "'Genera CSV aggiornato' per l'anar, poi reimporta in Mexal.")
+                    msg += f"   • {mote_out}\n   • {mori_out}\n"
+                msg += ("\nIn Mexal, nell'ordine:\n"
+                        "  1) importa anar (Anagrafica articoli)\n"
+                        "  2) importa carico (Movimenti di magazzino)\n"
+                        "  3) Ricalcolo listini (Servizi → Variazioni → Magazzino)")
                 self._log(self.doc_log, msg)
                 self._ui(lambda m=msg: messagebox.showinfo("Applicato", m))
             except Exception as e:

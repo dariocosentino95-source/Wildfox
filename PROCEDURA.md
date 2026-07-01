@@ -16,27 +16,30 @@ Guida passo-passo per importare una bolla/fattura fornitore e aggiornare in Mexa
    - 🟡 **auto-collega** — il codice esiste in Mexal, lo aggancio io a questo fornitore
    - 🔴 **nuovo** — non riconosciuto → serve il **collegamento guidato** (scegli tu l'articolo Mexal)
      oppure, se non esiste, crealo in **Articoli → Crea nuovo articolo**.
-4. Premi **✅ Applica**: aggiorna il database (codice fornitore + prezzo) e genera il
-   documento di **carico** (`carico_mote.csv` / `carico_mori.csv`) nella cartella Mexal.
-5. **Scheda "Importa / Esporta Mexal"** → **Genera CSV aggiornato**: crea `anar_idu.csv`
-   nella cartella Mexal (articoli nuovi, codici e costi aggiornati).
+4. Premi **✅ Applica**: aggiorna il database e genera **tutti i file in un colpo solo**
+   nella cartella Mexal:
+   - `anar_idu.csv` — articoli nuovi, codici fornitore, **costo**
+   - `carico_mote.csv` + `carico_mori.csv` — documento di **carico** (giacenze)
+
+   *(Richiede che `anar_idu.csv` sia già nella cartella Mexal: esportalo una volta da
+   Mexal, poi l'app lo aggiorna in automatico ad ogni bolla.)*
 
 ### Fase 2 — In Mexal
 
 > ⚠️ **Ordine importante:** prima l'anagrafica (anar), poi il carico. Così quando il carico
 > movimenta gli articoli nuovi, questi esistono già.
 
-6. **Punto di ripristino** (sicurezza): `Servizi → Punti di ripristino` → crea.
-7. **Importa l'anagrafica**: `Servizi → Trasferimento archivi → Caricamento ASCII/CSV →
+5. **Punto di ripristino** (sicurezza): `Servizi → Punti di ripristino` → crea.
+6. **Importa l'anagrafica**: `Servizi → Trasferimento archivi → Caricamento ASCII/CSV →
    Anagrafica articoli`. Prova con **Importazione definitiva = N**, poi rifai con **= S**.
    → crea articoli nuovi, codici fornitore, **costo**.
-8. **Importa il carico**: `Servizi → Trasferimento archivi → Caricamento ASCII/CSV →
+7. **Importa il carico**: `Servizi → Trasferimento archivi → Caricamento ASCII/CSV →
    Movimenti di magazzino`. Prova con **N**, poi **S**.
    → aggiorna le **giacenze**.
-9. **Ricalcola i prezzi di vendita**: `Servizi → Variazioni → Magazzino →
+8. **Ricalcola i prezzi di vendita**: `Servizi → Variazioni → Magazzino →
    Anagrafiche articoli/Listini` → pulsante **Ricalcolo listini** (base = **ultimo costo**).
    → aggiorna i **4 listini** (BASE / INSTALL / APPALTI / INGROSS) dal costo × ricarico categoria.
-10. **Verifica** un paio di articoli: codice fornitore, costo, giacenza e listini aggiornati. ✅
+9. **Verifica** un paio di articoli: codice fornitore, costo, giacenza e listini aggiornati. ✅
 
 ---
 
