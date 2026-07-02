@@ -798,6 +798,8 @@ class IDUApp(tk.Tk):
         self.doc_tree.tag_configure('ok', foreground=ACCENT2)
         # rincaro oltre soglia: sfondo rosso chiaro + testo rosso (spicca)
         self.doc_tree.tag_configure('rincaro', background='#fdecea', foreground=DANGER)
+        # calo di prezzo oltre soglia: sfondo azzurro + testo blu (occasione)
+        self.doc_tree.tag_configure('calo', background='#e6f1fb', foreground=ACCENT)
 
         lf = tk.LabelFrame(
             f, text=" Collegamento guidato codici NUOVI  (una riga:  CODICE_DOC = CODICE_MEXAL) ",
@@ -901,9 +903,14 @@ class IDUApp(tk.Tk):
                             d = (netto - reg) / reg * 100.0
                             diff_s = f"{d:+.0f}%"
                         tags = [base_tag] if base_tag else []
-                        # rincaro oltre soglia → riga in rosso (ha priorità sul colore)
+                        # oltre soglia: rosso se rincaro, blu se calo
+                        hl = None
                         if d is not None and d >= SOGLIA_RINCARO:
-                            tags.append('rincaro')
+                            hl = 'rincaro'
+                        elif d is not None and d <= -SOGLIA_RINCARO:
+                            hl = 'calo'
+                        if hl:
+                            tags.append(hl)
                         iid = self.doc_tree.insert(
                             '', 'end', tags=tuple(tags),
                             values=(c['codice'], c['mexal'] or '—',
@@ -913,10 +920,10 @@ class IDUApp(tk.Tk):
                                     f"{reg:.4f}" if reg else '—',
                                     diff_s,
                                     stato_txt))
-                        # 'rincaro' come ultimo tag → il rosso vince su 'oddrow'
-                        if 'rincaro' in tags:
+                        # evidenziazione come ultimo tag → vince su 'oddrow'
+                        if hl:
                             allt = [t for t in self.doc_tree.item(iid, 'tags')
-                                    if t != 'rincaro'] + ['rincaro']
+                                    if t != hl] + [hl]
                             self.doc_tree.item(iid, tags=tuple(allt))
                     if not use_fid:
                         self._log(self.doc_log,
