@@ -839,9 +839,11 @@ class IDUApp(tk.Tk):
 
     def _browse_doc(self):
         p = filedialog.askopenfilename(
-            title="Documento fornitore (PDF)",
+            title="Documento fornitore (PDF o immagine scansionata)",
             initialdir=os.path.join(os.path.expanduser('~'), 'Downloads'),
-            filetypes=[("PDF", "*.pdf"), ("Tutti", "*.*")])
+            filetypes=[("PDF e immagini", "*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp"),
+                       ("PDF", "*.pdf"), ("Immagini", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp"),
+                       ("Tutti", "*.*")])
         if p:
             self.doc_file_var.set(p)
             self._doc_path = p
@@ -871,9 +873,19 @@ class IDUApp(tk.Tk):
                 fmt_use = documents.formato_per_fornitore(use_fid) or fmt or 'auto'
                 items = documents.parse_items(path, fmt_use)
                 if not items:
-                    self._log(self.doc_log,
-                              "Nessuna riga riconosciuta. Se il fornitore non è stato "
-                              "rilevato, selezionalo dal menu a tendina e ri-analizza.")
+                    import ocr as _ocr
+                    low = path.lower()
+                    scan = (low.endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp'))
+                            or (low.endswith('.pdf') and not _ocr.pdf_has_text(path)))
+                    if scan and not _ocr.available():
+                        self._log(self.doc_log,
+                                  "📄 Documento SCANSIONATO (immagine, senza testo) e OCR non "
+                                  "installato. Lancia 'installa.bat' per abilitare la lettura "
+                                  "delle scansioni, oppure usa il PDF 'vero' (con testo) del fornitore.")
+                    else:
+                        self._log(self.doc_log,
+                                  "Nessuna riga riconosciuta. Se il fornitore non è stato "
+                                  "rilevato, selezionalo dal menu a tendina e ri-analizza.")
                     return
                 cls = documents.classify(items, use_fid) if use_fid else []
                 self._doc_items = items
@@ -895,6 +907,8 @@ class IDUApp(tk.Tk):
                         stato_txt = {'gia_collegato': 'già collegato',
                                      'auto_collega': 'auto-collega',
                                      'nuovo': 'NUOVO → collega'}.get(c['stato'], c['stato'])
+                        if c.get('ocr_incerto'):
+                            stato_txt = '⚠ ' + stato_txt   # riga OCR da verificare
                         netto = c['netto']
                         reg = c.get('registrato')
                         diff_s = '—'
@@ -938,6 +952,12 @@ class IDUApp(tk.Tk):
                         self._log(self.doc_log,
                                   "→ Per i NUOVI: 'Precompila codici nuovi' e scrivi il "
                                   "codice Mexal dopo l' '='.")
+                    if any(c.get('ocr') for c in cls):
+                        n_inc = sum(1 for c in cls if c.get('ocr_incerto'))
+                        self._log(self.doc_log,
+                                  f"⚠ Documento SCANSIONATO letto via OCR ({len(cls)} righe, "
+                                  f"{n_inc} da verificare ⚠). CONTROLLA codici, quantità e "
+                                  "prezzi prima di applicare (l'OCR può sbagliare qualche cifra).")
 
                 self._ui(render)
             except Exception as e:

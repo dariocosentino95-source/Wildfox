@@ -63,6 +63,12 @@ def formato_per_fornitore(fornitore_id):
 
 def parse_items(pdf_path: str, formato: str = 'auto'):
     """Estrae le righe del documento: [{codice, qta, prezzo_netto, ...}]."""
+    # Documento SCANSIONATO (PDF senza testo) o file immagine → OCR
+    import ocr
+    low = pdf_path.lower()
+    is_img = low.endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp'))
+    if is_img or (low.endswith('.pdf') and not ocr.pdf_has_text(pdf_path)):
+        return ocr.parse_document_ocr(pdf_path) if ocr.available() else []
     if formato == 'auto':
         formato = price_engine._detect_pdf_format(pdf_path)
     if formato == 'cardinale':
@@ -145,7 +151,9 @@ def classify(items, fornitore_id):
             mexal, descr, stato, cod_presente = None, None, 'nuovo', False
         out.append({'codice': cod, 'stato': stato, 'mexal': mexal,
                     'descrizione': descr, 'qta': qta, 'netto': netto,
-                    'registrato': registrato, 'cod_gia_presente': cod_presente})
+                    'registrato': registrato, 'cod_gia_presente': cod_presente,
+                    'ocr': it.get('ocr', False),
+                    'ocr_incerto': it.get('ocr_incerto', False)})
     return out
 
 

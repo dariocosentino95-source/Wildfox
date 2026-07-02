@@ -5,3 +5,4 @@ beautifulsoup4>=4.12
 lxml>=5.0
 openpyxl>=3.1
 playwright>=1.44
+rapidocr-onnxruntime>=1.3   # OCR per leggere DDT/fatture scansionati (immagini)
