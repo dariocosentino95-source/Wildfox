@@ -787,12 +787,13 @@ class IDUApp(tk.Tk):
         tk.Label(row2, text="(rilevato dal PDF; correggi se serve)",
                  font=FONT_S, bg=BG2, fg=FG2).pack(side='left', padx=6)
 
-        cols = ('codice', 'mexal', 'descrizione', 'qta', 'netto', 'stato')
+        cols = ('codice', 'mexal', 'descrizione', 'qta', 'netto',
+                'registrato', 'diff', 'stato')
         self.doc_tree = _tree(
             f, cols,
             headings=('Cod. doc.', 'Cod. Mexal', 'Descrizione', 'Q.tà',
-                      'Prezzo netto', 'Stato'),
-            widths=(110, 110, 250, 55, 90, 130), height=9)
+                      'Prezzo netto', 'Registrato', 'Diff %', 'Stato'),
+            widths=(100, 100, 210, 48, 85, 85, 70, 115), height=9)
         self.doc_tree.tag_configure('nuovo', foreground=WARN)
         self.doc_tree.tag_configure('ok', foreground=ACCENT2)
 
@@ -889,12 +890,20 @@ class IDUApp(tk.Tk):
                         stato_txt = {'gia_collegato': 'già collegato',
                                      'auto_collega': 'auto-collega',
                                      'nuovo': 'NUOVO → collega'}.get(c['stato'], c['stato'])
+                        netto = c['netto']
+                        reg = c.get('registrato')
+                        diff_s = '—'
+                        if netto and reg:
+                            d = (netto - reg) / reg * 100.0
+                            diff_s = f"{d:+.0f}%"
                         self.doc_tree.insert(
                             '', 'end', tags=((tag,) if tag else ()),
                             values=(c['codice'], c['mexal'] or '—',
                                     (c['descrizione'] or '—')[:45],
                                     f"{c['qta']:.0f}" if c['qta'] else '—',
-                                    f"{c['netto']:.4f}" if c['netto'] else '—',
+                                    f"{netto:.4f}" if netto else '—',
+                                    f"{reg:.4f}" if reg else '—',
+                                    diff_s,
                                     stato_txt))
                     if not use_fid:
                         self._log(self.doc_log,

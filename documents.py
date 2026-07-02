@@ -91,7 +91,7 @@ def classify(items, fornitore_id):
     codes = [(it.get('codice') or '').strip() for it in items]
     norm = sorted({c.upper() for c in codes if c})
 
-    cf_map, art_map, linked = {}, {}, set()
+    cf_map, art_map, linked, linked_price = {}, {}, set(), {}
     if norm:
         conn = db.get_connection()
         try:
@@ -101,11 +101,11 @@ def classify(items, fornitore_id):
                 # 1) codici fornitore DI QUESTO fornitore (in qualunque slot)
                 for r in conn.execute(f"""
                     SELECT UPPER(af.codice_fornitore) cf, a.codice mexal,
-                           a.descrizione descr
+                           a.descrizione descr, af.prezzo_fornitore prezzo
                     FROM articolo_fornitore af JOIN articoli a ON a.id=af.articolo_id
                     WHERE af.fornitore_id=? AND UPPER(af.codice_fornitore) IN ({ph})
                 """, [fornitore_id] + chunk):
-                    cf_map[r['cf']] = (r['mexal'], r['descr'])
+                    cf_map[r['cf']] = (r['mexal'], r['descr'], r['prezzo'])
                 # 2) articoli per codice Mexal
                 for r in conn.execute(f"""
                     SELECT UPPER(codice) cu, codice, descrizione FROM articoli
@@ -113,12 +113,14 @@ def classify(items, fornitore_id):
                 """, chunk):
                     art_map[r['cu']] = (r['codice'], r['descrizione'])
                 # 3) tra quegli articoli, quali sono già collegati a questo fornitore
+                #    (con il prezzo fornitore già registrato)
                 for r in conn.execute(f"""
-                    SELECT UPPER(a.codice) cu
+                    SELECT UPPER(a.codice) cu, af.prezzo_fornitore prezzo
                     FROM articoli a JOIN articolo_fornitore af ON af.articolo_id=a.id
                     WHERE af.fornitore_id=? AND UPPER(a.codice) IN ({ph})
                 """, [fornitore_id] + chunk):
                     linked.add(r['cu'])
+                    linked_price[r['cu']] = r['prezzo']
         finally:
             conn.close()
 
@@ -128,20 +130,22 @@ def classify(items, fornitore_id):
         cu = cod.upper()
         netto = it.get('prezzo_netto')
         qta = it.get('qta')
+        registrato = None
         if cu in cf_map:
-            mexal, descr = cf_map[cu]
+            mexal, descr, registrato = cf_map[cu]
             stato, cod_presente = 'gia_collegato', True
         elif cu in art_map:
             mexal, descr = art_map[cu]
             if cu in linked:
                 stato, cod_presente = 'gia_collegato', True
+                registrato = linked_price.get(cu)
             else:
                 stato, cod_presente = 'auto_collega', False
         else:
             mexal, descr, stato, cod_presente = None, None, 'nuovo', False
         out.append({'codice': cod, 'stato': stato, 'mexal': mexal,
                     'descrizione': descr, 'qta': qta, 'netto': netto,
-                    'cod_gia_presente': cod_presente})
+                    'registrato': registrato, 'cod_gia_presente': cod_presente})
     return out
 
 
