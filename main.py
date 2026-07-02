@@ -800,6 +800,11 @@ class IDUApp(tk.Tk):
         self.doc_tree.tag_configure('rincaro', background='#fdecea', foreground=DANGER)
         # calo di prezzo oltre soglia: sfondo azzurro + testo blu (occasione)
         self.doc_tree.tag_configure('calo', background='#e6f1fb', foreground=ACCENT)
+        # doppio clic su Codice/Q.tà/Prezzo netto → modifica in linea (correzione OCR)
+        self.doc_tree.bind('<Double-1>', self._doc_edit_cell)
+        tk.Label(f, text=("✏️  Doppio clic su Codice, Q.tà o Prezzo netto per correggere "
+                          "(utile con le scansioni OCR): la riga si ricalcola da sola."),
+                 font=FONT_S, bg=BG2, fg=FG2).pack(padx=20, anchor='w')
 
         lf = tk.LabelFrame(
             f, text=" Collegamento guidato codici NUOVI  (una riga:  CODICE_DOC = CODICE_MEXAL) ",
@@ -900,45 +905,10 @@ class IDUApp(tk.Tk):
                     import collections
                     cnt = collections.Counter(c['stato'] for c in cls)
                     self._doc_last_nuovi = [c['codice'] for c in cls if c['stato'] == 'nuovo']
-                    SOGLIA_RINCARO = 10  # % di aumento da evidenziare in rosso
-                    for c in cls:
-                        base_tag = ('nuovo' if c['stato'] == 'nuovo'
-                                    else ('ok' if c['stato'] == 'gia_collegato' else ''))
-                        stato_txt = {'gia_collegato': 'già collegato',
-                                     'auto_collega': 'auto-collega',
-                                     'nuovo': 'NUOVO → collega'}.get(c['stato'], c['stato'])
-                        if c.get('ocr_incerto'):
-                            stato_txt = '⚠ ' + stato_txt   # riga OCR da verificare
-                        netto = c['netto']
-                        reg = c.get('registrato')
-                        diff_s = '—'
-                        d = None
-                        if netto and reg:
-                            d = (netto - reg) / reg * 100.0
-                            diff_s = f"{d:+.0f}%"
-                        tags = [base_tag] if base_tag else []
-                        # oltre soglia: rosso se rincaro, blu se calo
-                        hl = None
-                        if d is not None and d >= SOGLIA_RINCARO:
-                            hl = 'rincaro'
-                        elif d is not None and d <= -SOGLIA_RINCARO:
-                            hl = 'calo'
-                        if hl:
-                            tags.append(hl)
-                        iid = self.doc_tree.insert(
-                            '', 'end', tags=tuple(tags),
-                            values=(c['codice'], c['mexal'] or '—',
-                                    (c['descrizione'] or '—')[:45],
-                                    f"{c['qta']:.0f}" if c['qta'] else '—',
-                                    f"{netto:.4f}" if netto else '—',
-                                    f"{reg:.4f}" if reg else '—',
-                                    diff_s,
-                                    stato_txt))
-                        # evidenziazione come ultimo tag → vince su 'oddrow'
-                        if hl:
-                            allt = [t for t in self.doc_tree.item(iid, 'tags')
-                                    if t != hl] + [hl]
-                            self.doc_tree.item(iid, tags=tuple(allt))
+                    for i, c in enumerate(cls):
+                        iid = str(i)
+                        self.doc_tree.insert('', 'end', iid=iid)
+                        self._doc_set_row(iid, c)
                     if not use_fid:
                         self._log(self.doc_log,
                                   "Fornitore non rilevato: scegli dal menu a tendina e ri-analizza.")
@@ -965,6 +935,106 @@ class IDUApp(tk.Tk):
                 logger.exception("Doc analyze")
 
         threading.Thread(target=_task, daemon=True).start()
+
+    # ── Documenti: render riga + modifica in linea (correzione OCR) ──
+
+    def _doc_set_row(self, iid, c):
+        """Imposta valori + colori di una riga della tabella documento."""
+        stato_txt = {'gia_collegato': 'già collegato', 'auto_collega': 'auto-collega',
+                     'nuovo': 'NUOVO → collega'}.get(c['stato'], c['stato'])
+        if c.get('ocr_incerto'):
+            stato_txt = '⚠ ' + stato_txt
+        netto = c.get('netto')
+        reg = c.get('registrato')
+        diff_s, d = '—', None
+        if netto and reg:
+            d = (netto - reg) / reg * 100.0
+            diff_s = f"{d:+.0f}%"
+        base_tag = ('nuovo' if c['stato'] == 'nuovo'
+                    else ('ok' if c['stato'] == 'gia_collegato' else ''))
+        hl = ('rincaro' if (d is not None and d >= 10)
+              else ('calo' if (d is not None and d <= -10) else None))
+        self.doc_tree.item(iid, values=(
+            c['codice'], c.get('mexal') or '—', (c.get('descrizione') or '—')[:45],
+            f"{c['qta']:.0f}" if c.get('qta') else '—',
+            f"{netto:.4f}" if netto else '—',
+            f"{reg:.4f}" if reg else '—', diff_s, stato_txt))
+        odd = 'oddrow' if 'oddrow' in self.doc_tree.item(iid, 'tags') else None
+        # 'hl' per ultimo così il colore vince su 'oddrow'
+        allt = ([base_tag] if base_tag else []) + ([odd] if odd else []) + ([hl] if hl else [])
+        self.doc_tree.item(iid, tags=tuple(allt))
+
+    def _doc_edit_cell(self, event):
+        """Doppio clic su una cella modificabile (codice/qta/prezzo) → editor."""
+        tree = self.doc_tree
+        if tree.identify_region(event.x, event.y) != 'cell':
+            return
+        col = tree.identify_column(event.x)
+        iid = tree.identify_row(event.y)
+        if not iid or not col:
+            return
+        try:
+            colname = tree['columns'][int(col[1:]) - 1]
+        except (ValueError, IndexError):
+            return
+        if colname not in ('codice', 'qta', 'netto'):
+            return
+        bbox = tree.bbox(iid, col)
+        if not bbox:
+            return
+        x, y, w, h = bbox
+        cur = tree.set(iid, colname)
+        ent = tk.Entry(tree, font=FONT_S, bg='#fffbe6', fg=FG,
+                       insertbackground=FG, relief='solid', bd=1)
+        ent.place(x=x, y=y, width=w, height=h)
+        ent.insert(0, '' if cur == '—' else cur)
+        ent.focus_set()
+        ent.select_range(0, 'end')
+
+        def commit(_e=None):
+            newv = ent.get().strip()
+            try:
+                ent.destroy()
+            except Exception:
+                pass
+            self._doc_apply_cell_edit(iid, colname, newv)
+
+        ent.bind('<Return>', commit)
+        ent.bind('<FocusOut>', commit)
+        ent.bind('<Escape>', lambda _e: ent.destroy())
+
+    def _doc_apply_cell_edit(self, iid, colname, newv):
+        """Applica la modifica al dato e ricalcola solo quella riga."""
+        items = getattr(self, '_doc_items', None)
+        fid = getattr(self, '_doc_fid', None)
+        try:
+            i = int(iid)
+        except ValueError:
+            return
+        if not items or i >= len(items):
+            return
+        it = items[i]
+        if colname == 'codice':
+            it['codice'] = newv
+        elif colname == 'qta':
+            try:
+                it['qta'] = float(newv.replace(',', '.')) if newv else None
+            except ValueError:
+                return
+        elif colname == 'netto':
+            try:
+                it['prezzo_netto'] = float(newv.replace(',', '.')) if newv else None
+            except ValueError:
+                return
+        it['ocr_incerto'] = False   # riga rivista dall'utente → via il ⚠
+        # ricalcola solo questa riga (stato, mexal, registrato, diff)
+        if fid:
+            c = documents.classify([it], fid)[0]
+        else:
+            c = {'codice': it.get('codice'), 'stato': 'nuovo', 'mexal': None,
+                 'descrizione': None, 'qta': it.get('qta'),
+                 'netto': it.get('prezzo_netto'), 'registrato': None}
+        self._doc_set_row(iid, c)
 
     def _doc_fill_links_template(self):
         nuovi = getattr(self, '_doc_last_nuovi', [])
