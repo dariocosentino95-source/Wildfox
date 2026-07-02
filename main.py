@@ -796,6 +796,8 @@ class IDUApp(tk.Tk):
             widths=(100, 100, 210, 48, 85, 85, 70, 115), height=9)
         self.doc_tree.tag_configure('nuovo', foreground=WARN)
         self.doc_tree.tag_configure('ok', foreground=ACCENT2)
+        # rincaro oltre soglia: sfondo rosso chiaro + testo rosso (spicca)
+        self.doc_tree.tag_configure('rincaro', background='#fdecea', foreground=DANGER)
 
         lf = tk.LabelFrame(
             f, text=" Collegamento guidato codici NUOVI  (una riga:  CODICE_DOC = CODICE_MEXAL) ",
@@ -884,20 +886,26 @@ class IDUApp(tk.Tk):
                     import collections
                     cnt = collections.Counter(c['stato'] for c in cls)
                     self._doc_last_nuovi = [c['codice'] for c in cls if c['stato'] == 'nuovo']
+                    SOGLIA_RINCARO = 10  # % di aumento da evidenziare in rosso
                     for c in cls:
-                        tag = ('nuovo' if c['stato'] == 'nuovo'
-                               else ('ok' if c['stato'] == 'gia_collegato' else ''))
+                        base_tag = ('nuovo' if c['stato'] == 'nuovo'
+                                    else ('ok' if c['stato'] == 'gia_collegato' else ''))
                         stato_txt = {'gia_collegato': 'già collegato',
                                      'auto_collega': 'auto-collega',
                                      'nuovo': 'NUOVO → collega'}.get(c['stato'], c['stato'])
                         netto = c['netto']
                         reg = c.get('registrato')
                         diff_s = '—'
+                        d = None
                         if netto and reg:
                             d = (netto - reg) / reg * 100.0
                             diff_s = f"{d:+.0f}%"
-                        self.doc_tree.insert(
-                            '', 'end', tags=((tag,) if tag else ()),
+                        tags = [base_tag] if base_tag else []
+                        # rincaro oltre soglia → riga in rosso (ha priorità sul colore)
+                        if d is not None and d >= SOGLIA_RINCARO:
+                            tags.append('rincaro')
+                        iid = self.doc_tree.insert(
+                            '', 'end', tags=tuple(tags),
                             values=(c['codice'], c['mexal'] or '—',
                                     (c['descrizione'] or '—')[:45],
                                     f"{c['qta']:.0f}" if c['qta'] else '—',
@@ -905,6 +913,11 @@ class IDUApp(tk.Tk):
                                     f"{reg:.4f}" if reg else '—',
                                     diff_s,
                                     stato_txt))
+                        # 'rincaro' come ultimo tag → il rosso vince su 'oddrow'
+                        if 'rincaro' in tags:
+                            allt = [t for t in self.doc_tree.item(iid, 'tags')
+                                    if t != 'rincaro'] + ['rincaro']
+                            self.doc_tree.item(iid, tags=tuple(allt))
                     if not use_fid:
                         self._log(self.doc_log,
                                   "Fornitore non rilevato: scegli dal menu a tendina e ri-analizza.")
