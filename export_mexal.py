@@ -14,6 +14,11 @@ import listini
 
 logger = logging.getLogger(__name__)
 
+# Margine sul costo: il costo ultimo (_ARCUL) = prezzo fornitore reale × questo
+# fattore (+5%). Così il 5% è dentro il costo e sopravvive anche al Ricalcolo
+# listini di Mexal (che parte dal costo). Il prezzo fornitore resta reale.
+MARKUP_COSTO = 1.05
+
 # Default strutturali per una NUOVA riga articolo (campi presenti in ~tutti gli
 # articoli reali). Usati quando si esporta un articolo creato nell'app e non
 # ancora presente in Mexal, così la riga è valida per la reimportazione.
@@ -85,10 +90,14 @@ def export_to_mexal_csv(csv_originale: str, output_path: str,
             'prezzo_base': r['prezzo_base'],
             'fornitore_codice': r['fornitore_codice'],
         }
-        # Il costo ultimo (_ARCUL) = prezzo_base più basso o quello impostato
-        if r['prezzo_base']:
-            if cod not in costo_db or r['prezzo_base'] < costo_db[cod]:
-                costo_db[cod] = r['prezzo_base']
+        # Costo ultimo (_ARCUL) = prezzo fornitore REALE più basso × 1.05.
+        # Il +5% è incorporato nel costo (non nel prezzo fornitore): così i
+        # listini — sia i nostri sia il Ricalcolo di Mexal, che parte dal costo —
+        # mantengono il margine. Il prezzo fornitore registrato resta reale.
+        if r['prezzo_fornitore']:
+            cst = round(r['prezzo_fornitore'] * MARKUP_COSTO, 4)
+            if cod not in costo_db or cst < costo_db[cod]:
+                costo_db[cod] = cst
 
     articoli_agg = 0
     prezzi_mod = 0
